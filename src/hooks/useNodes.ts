@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { BackendPool } from '../api/pool'
-import { dynamicSummaryMulti, kvGetMulti, listAgentUuids, staticDataMulti } from '../api/methods'
+import { dynamicSummaryMulti, kvGetMulti, listAgentUuids, staticDataMulti, taskQuery } from '../api/methods'
+import { buildLatencyTracks } from '../utils/latency'
+import type { LatencyTracks } from '../utils/latency'
 import { isOnline } from '../utils/status'
 import type { DynamicSummary, HistorySample, Node, NodeMeta, SiteConfig } from '../types'
 
@@ -49,8 +51,11 @@ const META_KEYS = [
   'metadata_price_unit',
   'metadata_price_cycle',
   'metadata_expire_time',
+  'metadata_traffic_limit',
 ]
 const DYN_INTERVAL_MS = 2000
+const LATENCY_INTERVAL_MS = 30_000
+const LATENCY_QUERY_TIMEOUT = 10_000
 const HISTORY_LIMIT = 60
 
 function emptyMeta(): NodeMeta {
@@ -80,6 +85,7 @@ function parseMeta(raw: Record<string, unknown>): NodeMeta {
   const order = Number(raw.metadata_order)
   const price = Number(raw.metadata_price)
   const cycle = Number(raw.metadata_price_cycle)
+  const trafficLimit = Number(raw.metadata_traffic_limit)
   return {
     name: raw.metadata_name ? String(raw.metadata_name) : '',
     region: raw.metadata_region ? String(raw.metadata_region) : '',
@@ -93,6 +99,7 @@ function parseMeta(raw: Record<string, unknown>): NodeMeta {
     priceUnit: raw.metadata_price_unit ? String(raw.metadata_price_unit) : '$',
     priceCycle: Number.isFinite(cycle) && cycle > 0 ? cycle : 30,
     expireTime: raw.metadata_expire_time ? String(raw.metadata_expire_time) : '',
+    trafficLimit: Number.isFinite(trafficLimit) && trafficLimit > 0 ? trafficLimit : undefined,
   }
 }
 
@@ -120,6 +127,10 @@ export function useNodes(config: SiteConfig | null) {
   const [loading, setLoading] = useState(true)
   const [tick, setTick] = useState(0)
   const [pool, setPool] = useState<BackendPool | null>(null)
+  const [latencyTracks, setLatencyTracks] = useState<Map<string, LatencyTracks>>(new Map())
+
+  const agentsRef = useRef(agents)
+  useEffect(() => { agentsRef.current = agents }, [agents])
 
   useEffect(() => {
     if (!config?.site_tokens?.length) {
@@ -235,10 +246,58 @@ export function useNodes(config: SiteConfig | null) {
       })
     }
 
-    bootstrap().catch((e: unknown) => {
-      setErrors(prev => [...prev, { source: '*', error: e }])
-      setLoading(false)
-    })
+    const tickLatency = async () => {
+      if (!pool) return
+      const now = Date.now()
+      const window: [number, number] = [now - 30 * 60 * 1000, now]
+      const updates = new Map<string, LatencyTracks>()
+
+      await Promise.allSettled(
+        pool.entries.map(async entry => {
+          const uuids = sourceUuids.get(entry.name) || []
+          if (!uuids.length) return
+
+          const batchSize = 10
+          for (let i = 0; i < uuids.length; i += batchSize) {
+            const batch = uuids.slice(i, i + batchSize)
+            const results = await Promise.allSettled(
+              batch.map(async uuid => {
+                const rows = await taskQuery(
+                  entry.client,
+                  [{ uuid }, { timestamp_from_to: window }, { type: 'ping' }, { limit: 200 }],
+                  LATENCY_QUERY_TIMEOUT,
+                )
+                const agent = agentsRef.current.get(uuid)
+                const region = agent?.meta?.region
+                const tracks = buildLatencyTracks(rows, region, 10, 180000)
+                return { uuid, tracks, hasData: rows.length > 0 }
+              }),
+            )
+            for (const r of results) {
+              if (r.status === 'fulfilled') {
+                updates.set(r.value.uuid, r.value.hasData ? r.value.tracks : {})
+              }
+            }
+          }
+        }),
+      )
+
+      if (updates.size > 0) {
+        setLatencyTracks(prev => new Map([...prev, ...updates]))
+      }
+    }
+
+    let latTimer: ReturnType<typeof setInterval> | null = null
+
+    bootstrap()
+      .then(() => {
+        tickLatency().catch(() => {})
+        latTimer = setInterval(tickLatency, LATENCY_INTERVAL_MS)
+      })
+      .catch((e: unknown) => {
+        setErrors(prev => [...prev, { source: '*', error: e }])
+        setLoading(false)
+      })
 
     const onVisible = () => {
       if (document.visibilityState === 'visible') tickDynamic()
@@ -251,6 +310,7 @@ export function useNodes(config: SiteConfig | null) {
     return () => {
       clearInterval(dynTimer)
       clearInterval(clockTimer)
+      if (latTimer) clearInterval(latTimer)
       document.removeEventListener('visibilitychange', onVisible)
       setPool(null)
       pool.close()
@@ -272,5 +332,5 @@ export function useNodes(config: SiteConfig | null) {
     return out
   }, [agents, live, history, tick])
 
-  return { nodes, errors, loading, pool }
+  return { nodes, errors, loading, pool, latencyTracks }
 }

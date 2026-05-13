@@ -18,6 +18,8 @@ export function deriveUsage(node: Node): Usage {
     netOut: d?.transmit_speed,
     uptime: d?.uptime,
     ts: d?.timestamp,
+    trafficIn: d?.total_received ?? 0,
+    trafficOut: d?.total_transmitted ?? 0,
   }
 }
 

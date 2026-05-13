@@ -1,3 +1,4 @@
+import { REGION_BASELINE } from './cn'
 import type { LatencyType, TaskQueryResult } from '../types'
 
 const COLORS = [
@@ -201,6 +202,244 @@ export interface LatencyStats {
   avg: number | null
   jitter: number | null
   lossRate: number
+}
+
+export interface LatencyBlock {
+  t: number
+  status: 'green' | 'yellow' | 'red' | 'empty'
+  className: string
+  avg: number | null
+  lossRate: number
+  sourceDetails?: Record<string, { avg: number; lossRate: number; total: number; loss: number }>
+}
+
+// ── 三轨道 (CM/CU/CT) 数据结构 ──
+
+export type IspKey = 'cm' | 'cu' | 'ct'
+
+export interface TrackBlock {
+  t: number
+  status: 'green' | 'yellow' | 'red' | 'empty'
+  className: string
+  avg: number | null
+  lossCount: number
+  total: number
+}
+
+export interface LatencyTrack {
+  isp: IspKey
+  label: string
+  shortLabel: string
+  blocks: TrackBlock[]
+}
+
+export type LatencyTracks = Partial<Record<IspKey, LatencyTrack>>
+
+const ISP_CONFIG: Record<IspKey, { label: string; shortLabel: string }> = {
+  cm: { label: '移动', shortLabel: 'CM' },
+  cu: { label: '联通', shortLabel: 'CU' },
+  ct: { label: '电信', shortLabel: 'CT' },
+}
+
+export function detectIsp(source: string): IspKey | null {
+  const s = source.toUpperCase()
+  if (s.includes('CM') || s.includes('移动') || s.includes('MOBILE')) return 'cm'
+  if (s.includes('CU') || s.includes('联通') || s.includes('UNICOM')) return 'cu'
+  if (s.includes('CT') || s.includes('电信') || s.includes('TELECOM')) return 'ct'
+  return null
+}
+
+export function buildLatencyBlocks(
+  rows: TaskQueryResult[],
+  region: string | null | undefined,
+  blockCount = 20,
+  blockDurationMs = 30000,
+): LatencyBlock[] {
+  const now = Date.now()
+  const baseline = REGION_BASELINE[region?.trim().toUpperCase() || ''] || REGION_BASELINE.DEFAULT
+
+  const sources = [...new Set(rows.map(r => r.cron_source || '未知'))].sort()
+  const blocks: LatencyBlock[] = []
+
+  for (let i = 0; i < blockCount; i++) {
+    const end = now - i * blockDurationMs
+    const start = end - blockDurationMs
+
+    const bucketRows = rows.filter(r => {
+      const ts = normalizeTs(r.timestamp)
+      return ts >= start && ts < end
+    })
+
+    if (!bucketRows.length) {
+      blocks.push({
+        t: start,
+        status: 'empty',
+        className: 'bg-muted-foreground/5',
+        avg: null,
+        lossRate: 0,
+      })
+      continue
+    }
+
+    let worstStatus: LatencyBlock['status'] = 'green'
+    let worstClassName = 'bg-emerald-500'
+    const sourceDetails: Record<string, { avg: number; lossRate: number; total: number; loss: number }> = {}
+    let totalAvg = 0
+    let totalLoss = 0
+    let sourceCount = 0
+
+    for (const source of sources) {
+      const sourceRows = bucketRows.filter(r => (r.cron_source || '未知') === source)
+      const vals: number[] = []
+      for (const r of sourceRows) {
+        const v = pickValue(r, 'ping')
+        if (v != null) vals.push(v)
+      }
+
+      const lossCount = sourceRows.length - vals.length
+      const lossRate = sourceRows.length
+        ? (lossCount / sourceRows.length) * 100
+        : 0
+      const avg = vals.length
+        ? vals.reduce((s, v) => s + v, 0) / vals.length
+        : 0
+
+      const R = avg / baseline
+      const isRed = R > 1.5 || lossCount >= 2
+      const isYellow = R > 1.1 || lossCount === 1
+
+      let status: LatencyBlock['status']
+      let className: string
+
+      if (isRed) {
+        status = 'red'
+        className = 'bg-rose-500'
+      } else if (isYellow) {
+        status = 'yellow'
+        className = 'bg-amber-500'
+      } else {
+        status = 'green'
+        className = 'bg-emerald-500'
+      }
+
+      sourceDetails[source] = { avg, lossRate, total: sourceRows.length, loss: lossCount }
+      totalAvg += avg
+      totalLoss += lossRate
+      sourceCount++
+
+      if (status === 'red') {
+        worstStatus = 'red'
+        worstClassName = 'bg-rose-500'
+      } else if (status === 'yellow' && worstStatus === 'green') {
+        worstStatus = 'yellow'
+        worstClassName = 'bg-amber-500'
+      }
+    }
+
+    blocks.push({
+      t: start,
+      status: worstStatus,
+      className: worstClassName,
+      avg: sourceCount ? totalAvg / sourceCount : 0,
+      lossRate: sourceCount ? totalLoss / sourceCount : 0,
+      sourceDetails,
+    })
+  }
+
+  return blocks.reverse()
+}
+
+export function buildLatencyTracks(
+  rows: TaskQueryResult[],
+  region: string | null | undefined,
+  blockCount = 20,
+  blockDurationMs = 180000,
+): LatencyTracks {
+  const now = Date.now()
+  const baseline = REGION_BASELINE[region?.trim().toUpperCase() || ''] || REGION_BASELINE.DEFAULT
+
+  // 按 ISP 分类所有数据
+  const ispRows: Record<IspKey, TaskQueryResult[]> = { cm: [], cu: [], ct: [] }
+  for (const r of rows) {
+    const isp = detectIsp(r.cron_source || '')
+    if (isp) ispRows[isp].push(r)
+  }
+
+  const result: LatencyTracks = {}
+
+  for (const isp of ['cm', 'cu', 'ct'] as IspKey[]) {
+    const sourceRows = ispRows[isp]
+    if (!sourceRows.length) continue
+
+    const blocks: TrackBlock[] = []
+    for (let i = 0; i < blockCount; i++) {
+      const end = now - i * blockDurationMs
+      const start = end - blockDurationMs
+
+      const bucketRows = sourceRows.filter(r => {
+        const ts = normalizeTs(r.timestamp)
+        return ts >= start && ts < end
+      })
+
+      if (!bucketRows.length) {
+        blocks.push({
+          t: start,
+          status: 'empty',
+          className: 'bg-muted-foreground/5',
+          avg: null,
+          lossCount: 0,
+          total: 0,
+        })
+        continue
+      }
+
+      const vals: number[] = []
+      for (const r of bucketRows) {
+        const v = pickValue(r, 'ping')
+        if (v != null) vals.push(v)
+      }
+
+      const lossCount = bucketRows.length - vals.length
+      const avg = vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0
+      const R = avg / baseline
+
+      const isRed = R > 1.5 || lossCount >= 2
+      const isYellow = R > 1.1 || lossCount === 1
+
+      let status: TrackBlock['status']
+      let className: string
+
+      if (isRed) {
+        status = 'red'
+        className = 'bg-rose-500'
+      } else if (isYellow) {
+        status = 'yellow'
+        className = 'bg-amber-500'
+      } else {
+        status = 'green'
+        className = 'bg-emerald-500'
+      }
+
+      blocks.push({
+        t: start,
+        status,
+        className,
+        avg,
+        lossCount,
+        total: bucketRows.length,
+      })
+    }
+
+    const cfg = ISP_CONFIG[isp]
+    result[isp] = {
+      isp,
+      label: cfg.label,
+      shortLabel: cfg.shortLabel,
+      blocks: blocks.reverse(),
+    }
+  }
+
+  return result
 }
 
 export function computeLatencyStats(rows: TaskQueryResult[], type: LatencyType): LatencyStats[] {

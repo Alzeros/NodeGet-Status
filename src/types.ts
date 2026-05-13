@@ -11,6 +11,7 @@ export interface NodeMeta {
   priceUnit: string
   priceCycle: number
   expireTime: string
+  trafficLimit?: number
 }
 
 export interface StaticSystem {
@@ -161,4 +162,6 @@ export interface Usage {
   netOut?: number
   uptime?: number
   ts?: number
+  trafficIn?: number
+  trafficOut?: number
 }

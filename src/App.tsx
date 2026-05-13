@@ -40,7 +40,7 @@ const num = (v?: number) => (Number.isFinite(v) ? (v as number) : -Infinity)
 
 export function App() {
   const { config, error: configError } = useConfig()
-  const { nodes, errors, pool } = useNodes(config)
+  const { nodes, errors, pool, latencyTracks } = useNodes(config)
 
   const [view, setView] = useState<View>(initialView)
   const [sort, setSort] = useState<Sort>(initialSort)
@@ -223,7 +223,7 @@ export function App() {
         {!empty && view === 'cards' && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {list.map(n => (
-              <NodeCard key={n.uuid} node={n} />
+              <NodeCard key={n.uuid} node={n} latencyTracks={latencyTracks.get(n.uuid)} />
             ))}
           </div>
         )}
