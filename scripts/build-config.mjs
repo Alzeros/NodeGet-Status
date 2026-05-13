@@ -85,3 +85,18 @@ const finalConfig = {
 // 写入输出文件
 writeFileSync(outputPath, JSON.stringify(finalConfig, null, 2) + '\n')
 console.log(`[build-config] wrote ${siteTokens.length} site_tokens to ${outputPath}`)
+
+// 如果有 site_logo，同步替换 dist/index.html 中的 favicon
+const siteLogo = finalConfig.user_preferences.site_logo
+if (siteLogo) {
+  const indexPath = resolve(projectRoot, 'dist/index.html')
+  if (existsSync(indexPath)) {
+    let html = readFileSync(indexPath, 'utf-8')
+    html = html.replace(
+      /<link rel="icon"[^>]*href="[^"]*"[^>]*>/,
+      `<link rel="icon" type="image/png" href="${siteLogo}" />`,
+    )
+    writeFileSync(indexPath, html, 'utf-8')
+    console.log(`[build-config] updated favicon to ${siteLogo}`)
+  }
+}
