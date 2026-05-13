@@ -42,6 +42,126 @@ export interface ChartSeries {
   color: string
 }
 
+// 计算数组的 p 分位数（0-1）
+function percentile(sorted: number[], p: number): number {
+  if (!sorted.length) return 0
+  const idx = Math.max(0, Math.min(sorted.length - 1, Math.ceil(sorted.length * p) - 1))
+  return sorted[idx]
+}
+
+// 中值滤波：窗口大小为3，消除瞬时尖刺
+function medianFilter(data: ChartPoint[], seriesNames: string[]): ChartPoint[] {
+  if (data.length < 3) return data
+  const result: ChartPoint[] = []
+
+  for (let i = 0; i < data.length; i++) {
+    const next: ChartPoint = { t: data[i].t }
+    for (const name of seriesNames) {
+      if (i === 0 || i === data.length - 1) {
+        next[name] = data[i][name]
+        continue
+      }
+      const window = [data[i - 1][name], data[i][name], data[i + 1][name]].filter(
+        (v): v is number => v != null,
+      )
+      if (window.length < 3) {
+        next[name] = data[i][name]
+      } else {
+        window.sort((a, b) => a - b)
+        next[name] = window[1] // 中值
+      }
+    }
+    result.push(next)
+  }
+
+  return result
+}
+
+// 均值平滑：每 windowSize 个点取均值，过滤微小跳变
+function meanSmooth(
+  data: ChartPoint[],
+  seriesNames: string[],
+  windowSize: number,
+): ChartPoint[] {
+  if (data.length < windowSize) return data
+  const result: ChartPoint[] = []
+
+  for (let i = 0; i < data.length; i += windowSize) {
+    const window = data.slice(i, i + windowSize)
+    const midIdx = Math.floor(window.length / 2)
+    const next: ChartPoint = { t: window[midIdx].t }
+
+    for (const name of seriesNames) {
+      const vals = window
+        .map(p => p[name])
+        .filter((v): v is number => v != null)
+      if (vals.length) {
+        next[name] = vals.reduce((s, v) => s + v, 0) / vals.length
+      } else {
+        next[name] = null
+      }
+    }
+    result.push(next)
+  }
+
+  return result
+}
+
+// 降采样：按时间窗口聚合，减少渲染点数量
+function downsample(
+  data: ChartPoint[],
+  seriesNames: string[],
+  targetPoints: number,
+): ChartPoint[] {
+  if (data.length <= targetPoints) return data
+
+  const bucketSize = Math.ceil(data.length / targetPoints)
+  const result: ChartPoint[] = []
+
+  for (let i = 0; i < data.length; i += bucketSize) {
+    const bucket = data.slice(i, i + bucketSize)
+    const t = bucket[Math.floor(bucket.length / 2)].t
+    const pt: ChartPoint = { t }
+
+    for (const name of seriesNames) {
+      const vals = bucket
+        .map(p => p[name])
+        .filter((v): v is number => v != null)
+      if (vals.length) {
+        vals.sort((a, b) => a - b)
+        pt[name] = percentile(vals, 0.95) // 用 P95 作为聚合值，保留峰值特征但减少噪声
+      } else {
+        pt[name] = null
+      }
+    }
+    result.push(pt)
+  }
+
+  return result
+}
+
+// 数据预处理管道：中值滤波 → 均值平滑 → 降采样
+export function preprocessLatencyData(
+  data: ChartPoint[],
+  seriesNames: string[],
+  timeRange: '1h' | '6h' | '24h' | '7d',
+): ChartPoint[] {
+  // 1. 中值滤波消除瞬时尖刺
+  let result = medianFilter(data, seriesNames)
+
+  // 2. 1小时视图额外进行均值平滑（每3个点取均值），过滤微小跳变
+  if (timeRange === '1h') {
+    result = meanSmooth(result, seriesNames, 3)
+  }
+
+  // 3. 根据时间范围降采样（大幅减少1小时视图的渲染点数）
+  const targetPoints =
+    timeRange === '1h' ? 60 : timeRange === '6h' ? 150 : timeRange === '24h' ? 300 : 400
+  result = downsample(result, seriesNames, targetPoints)
+
+  return result
+}
+
 function forwardFill(data: ChartPoint[], names: string[]) {
   const last: Record<string, number | null> = {}
   for (const n of names) last[n] = null

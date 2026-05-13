@@ -3,6 +3,7 @@ import { ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react'
 import {
   Area,
   AreaChart,
+  CartesianGrid,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -21,6 +22,7 @@ import { cycleProgress, hasCost, remainingDays, remainingValue } from '../utils/
 import { cn, strokeColor } from '../utils/cn'
 import {
   buildLatencyChart,
+  preprocessLatencyData,
   computeLatencyStats,
   type LatencyStats,
 } from '../utils/latency'
@@ -49,6 +51,7 @@ export function NodeDetail({ node, onClose, showSource, pool }: Props) {
   const [timeRange, setTimeRange] = useState<LatencyTimeRange>('1h')
   const [tcpExpanded, setTcpExpanded] = useState(false)
   const [pingExpanded, setPingExpanded] = useState(false)
+  const [smoothCurve, setSmoothCurve] = useState(true)
 
   useEffect(() => {
     if (!node) return
@@ -204,24 +207,45 @@ export function NodeDetail({ node, onClose, showSource, pool }: Props) {
           </Section>
         )}
 
-        {/* 时间范围选择器（展开任意一个时显示） */}
+        {/* 时间范围选择器 + 平滑曲线开关（展开任意一个时显示） */}
         {(tcpExpanded || pingExpanded) && (
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">时间范围:</span>
-            {(['1h', '6h', '24h', '7d'] as LatencyTimeRange[]).map(range => (
-              <button
-                key={range}
-                onClick={() => setTimeRange(range)}
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">时间范围:</span>
+              {(['1h', '6h', '24h', '7d'] as LatencyTimeRange[]).map(range => (
+                <button
+                  key={range}
+                  onClick={() => setTimeRange(range)}
+                  className={cn(
+                    'px-2.5 py-1 text-xs rounded-md transition-colors',
+                    timeRange === range
+                      ? 'bg-primary text-primary-foreground font-medium'
+                      : 'bg-muted text-muted-foreground hover:bg-muted/80',
+                  )}
+                >
+                  {range === '1h' ? '1小时' : range === '6h' ? '6小时' : range === '24h' ? '24小时' : '7天'}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setSmoothCurve(!smoothCurve)}
+              className="flex items-center gap-2 ml-auto"
+            >
+              <span className="text-xs text-muted-foreground">平滑曲线</span>
+              <div
                 className={cn(
-                  'px-2.5 py-1 text-xs rounded-md transition-colors',
-                  timeRange === range
-                    ? 'bg-primary text-primary-foreground font-medium'
-                    : 'bg-muted text-muted-foreground hover:bg-muted/80',
+                  'relative w-9 h-5 rounded-full transition-colors',
+                  smoothCurve ? 'bg-primary' : 'bg-muted',
                 )}
               >
-                {range === '1h' ? '1小时' : range === '6h' ? '6小时' : range === '24h' ? '24小时' : '7天'}
-              </button>
-            ))}
+                <span
+                  className={cn(
+                    'absolute top-0.5 left-0.5 h-4 w-4 transform rounded-full bg-white transition-transform',
+                    smoothCurve ? 'translate-x-4' : 'translate-x-0',
+                  )}
+                />
+              </div>
+            </button>
           </div>
         )}
 
@@ -248,6 +272,8 @@ export function NodeDetail({ node, onClose, showSource, pool }: Props) {
                 type="tcp_ping"
                 loading={latencyLoading}
                 timeRangeLabel={timeRange === '1h' ? '近 1 小时' : timeRange === '6h' ? '近 6 小时' : timeRange === '24h' ? '近 24 小时' : '近 7 天'}
+                timeRange={timeRange}
+                smoothCurve={smoothCurve}
               />
             </div>
           )}
@@ -276,6 +302,8 @@ export function NodeDetail({ node, onClose, showSource, pool }: Props) {
                 type="ping"
                 loading={latencyLoading}
                 timeRangeLabel={timeRange === '1h' ? '近 1 小时' : timeRange === '6h' ? '近 6 小时' : timeRange === '24h' ? '近 24 小时' : '近 7 天'}
+                timeRange={timeRange}
+                smoothCurve={smoothCurve}
               />
             </div>
           )}
@@ -437,15 +465,23 @@ function Spark({ data, dataKey, label, stroke, domain, format }: SparkProps) {
 
 interface LatencyBlockProps {
   timeRangeLabel: string
+  timeRange: LatencyTimeRange
   rows: TaskQueryResult[]
   type: LatencyType
   loading: boolean
+  smoothCurve: boolean
 }
 
 const ms = (v: number) => `${v.toFixed(1)} ms`
 
-function LatencyBlock({ timeRangeLabel, rows, type, loading }: LatencyBlockProps) {
-  const { data, series } = useMemo(() => buildLatencyChart(rows, type), [rows, type])
+function LatencyBlock({ timeRangeLabel, timeRange, rows, type, loading, smoothCurve }: LatencyBlockProps) {
+  const raw = useMemo(() => buildLatencyChart(rows, type), [rows, type])
+  const data = useMemo(() => {
+    if (!smoothCurve) return raw.data
+    // 中值滤波 + 降采样
+    return preprocessLatencyData(raw.data, raw.series.map(s => s.name), timeRange)
+  }, [raw, smoothCurve, timeRange])
+  const series = raw.series
   const stats = useMemo(() => computeLatencyStats(rows, type), [rows, type])
   const [hidden, setHidden] = useState<Set<string>>(() => new Set())
   const empty = data.length === 0
@@ -487,19 +523,46 @@ function LatencyBlock({ timeRangeLabel, rows, type, loading }: LatencyBlockProps
                 width={48}
                 domain={['auto', 'auto']}
               />
+              <CartesianGrid
+                strokeDasharray="3 3"
+                stroke="hsl(var(--muted-foreground) / 0.15)"
+                vertical={false}
+              />
               <Tooltip
                 contentStyle={TOOLTIP_STYLE}
                 labelFormatter={t => new Date(Number(t)).toLocaleTimeString()}
                 formatter={(v: number) => ms(Number(v))}
               />
+              {/* 渐变定义 */}
+              <defs>
+                {visibleSeries.map(s => (
+                  <linearGradient key={s.name} id={`gradient-${s.name}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={s.color} stopOpacity={0.1} />
+                    <stop offset="100%" stopColor={s.color} stopOpacity={0.02} />
+                  </linearGradient>
+                ))}
+              </defs>
+              {/* 面积填充 */}
+              {visibleSeries.map(s => (
+                <Area
+                  key={`area-${s.name}`}
+                  type="monotone"
+                  dataKey={s.name}
+                  fill={`url(#gradient-${s.name})`}
+                  stroke="none"
+                  isAnimationActive={false}
+                />
+              ))}
+              {/* 线条 */}
               {visibleSeries.map(s => (
                 <Line
-                  key={s.name}
+                  key={`line-${s.name}`}
                   type="monotone"
                   dataKey={s.name}
                   stroke={s.color}
-                  strokeWidth={1.5}
+                  strokeWidth={2}
                   dot={false}
+                  activeDot={{ r: 5 }}
                   connectNulls
                   isAnimationActive={false}
                 />
