@@ -1,8 +1,29 @@
-import { writeFileSync } from 'node:fs'
+import { writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import themeTemplate from '../nodeget-theme.json' with { type: 'json' }
 import pkg from '../package.json' with { type: 'json' }
+
+// 本地开发时加载 .env.local
+const envLocalPath = resolve(dirname(fileURLToPath(import.meta.url)), '../.env.local')
+if (existsSync(envLocalPath)) {
+  const content = readFileSync(envLocalPath, 'utf-8')
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const eq = trimmed.indexOf('=')
+    if (eq === -1) continue
+    const key = trimmed.slice(0, eq).trim()
+    let value = trimmed.slice(eq + 1).trim()
+    // 去掉首尾的引号
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1)
+    }
+    if (key && process.env[key] === undefined) {
+      process.env[key] = value
+    }
+  }
+}
 
 themeTemplate.version = pkg.version
 

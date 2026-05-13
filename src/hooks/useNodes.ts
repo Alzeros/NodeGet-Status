@@ -153,21 +153,39 @@ export function useNodes(config: SiteConfig | null) {
             staticDataMulti(entry.client, uuids, STATIC_FIELDS),
           ])
 
+          let metaRows: { namespace: string; key: string; value: unknown }[] = []
+          if (meta.status === 'fulfilled' && meta.value) {
+            metaRows = meta.value
+          } else {
+            // 批量请求失败，降级为逐个 key 请求
+            const fallback = await Promise.allSettled(
+              META_KEYS.map(key =>
+                kvGetMulti(
+                  entry.client,
+                  uuids.map(u => ({ namespace: u, key })),
+                ),
+              ),
+            )
+            for (const result of fallback) {
+              if (result.status === 'fulfilled' && result.value) {
+                metaRows.push(...result.value)
+              }
+            }
+          }
+
           setAgents(prev => {
             const next = new Map(prev)
 
-            if (meta.status === 'fulfilled' && meta.value) {
-              const grouped = new Map<string, Record<string, unknown>>()
-              for (const row of meta.value) {
-                if (!row || row.value == null) continue
-                let bucket = grouped.get(row.namespace)
-                if (!bucket) grouped.set(row.namespace, (bucket = {}))
-                bucket[row.key] = row.value
-              }
-              for (const uuid of uuids) {
-                const cur = next.get(uuid) ?? blankAgent(uuid, entry.name)
-                next.set(uuid, { ...cur, meta: parseMeta(grouped.get(uuid) ?? {}) })
-              }
+            const grouped = new Map<string, Record<string, unknown>>()
+            for (const row of metaRows) {
+              if (!row || row.value == null) continue
+              let bucket = grouped.get(row.namespace)
+              if (!bucket) grouped.set(row.namespace, (bucket = {}))
+              bucket[row.key] = row.value
+            }
+            for (const uuid of uuids) {
+              const cur = next.get(uuid) ?? blankAgent(uuid, entry.name)
+              next.set(uuid, { ...cur, meta: parseMeta(grouped.get(uuid) ?? {}) })
             }
 
             if (stat.status === 'fulfilled' && stat.value) {
