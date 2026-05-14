@@ -4,6 +4,13 @@ export function bytes(n?: number | null) {
   return n && n > 0 ? prettyBytes(n, {binary:true}) : '0 B'
 }
 
+export function bytesParts(n?: number | null): { num: string; unit: string } {
+  const s = bytes(n)
+  const m = s.match(/^([\d.]+)\s*(.*)$/)
+  if (m) return { num: m[1], unit: m[2] }
+  return { num: s, unit: '' }
+}
+
 export function pct(v?: number | null) {
   if (v == null || !Number.isFinite(v)) return '—'
   return `${v.toFixed(1)}%`

@@ -401,10 +401,8 @@ export function buildLatencyTracks(
 
       const lossCount = bucketRows.length - vals.length
       const avg = vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0
-      const R = avg / baseline
-
-      const isRed = R > 1.5 || lossCount >= 2
-      const isYellow = R > 1.1 || lossCount === 1
+      const isRed = lossCount > 1 || avg > 500
+      const isYellow = !isRed && (lossCount === 1 || avg > baseline)
 
       let status: TrackBlock['status']
       let className: string

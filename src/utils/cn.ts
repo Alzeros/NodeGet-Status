@@ -20,16 +20,16 @@ export function strokeColor(v?: number | null) {
 }
 
 export const REGION_BASELINE: Record<string, number> = {
-  US: 180,
-  HK: 70,
-  CN: 50,
-  TW: 100,
-  KR: 100,
-  IN: 100,
-  JP: 100,
-  SG: 90,
-  EU: 200,
-  DEFAULT: 200,
+  US: 220,
+  HK: 80,
+  CN: 60,
+  TW: 120,
+  KR: 120,
+  IN: 120,
+  JP: 120,
+  SG: 110,
+  EU: 250,
+  DEFAULT: 250,
 }
 
 export interface NetworkQualityResult {

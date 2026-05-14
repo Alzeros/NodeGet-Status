@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Loader2 } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from './components/ui/alert'
 import { useConfig } from './hooks/useConfig'
@@ -6,6 +6,7 @@ import { useNodes } from './hooks/useNodes'
 import { Background } from './components/Background'
 import { Navbar } from './components/Navbar'
 import { Footer } from './components/Footer'
+import { GlobalStats } from './components/GlobalStats'
 import { NodeCard } from './components/NodeCard'
 import { NodeTable } from './components/NodeTable'
 import { NodeDetail } from './components/NodeDetail'
@@ -41,6 +42,59 @@ const num = (v?: number) => (Number.isFinite(v) ? (v as number) : -Infinity)
 export function App() {
   const { config, error: configError } = useConfig()
   const { nodes, errors, pool, latencyTracks } = useNodes(config)
+  const bandwidthHistoryRef = useRef<number[]>([])
+  const trafficHistoryRef = useRef<number[]>([])
+  const netInHistoryRef = useRef<number[]>([])
+
+  const globalStats = useMemo(() => {
+    let onlineCount = 0
+    let totalCount = 0
+    let totalNetIn = 0
+    let totalNetOut = 0
+    let totalTrafficIn = 0
+    let totalTrafficOut = 0
+    const regions = new Set<string>()
+
+    for (const n of nodes.values()) {
+      if (n.meta?.hidden) continue
+      totalCount++
+      if (n.online) onlineCount++
+      totalNetIn += n.dynamic?.receive_speed ?? 0
+      totalNetOut += n.dynamic?.transmit_speed ?? 0
+      totalTrafficIn += n.dynamic?.total_received ?? 0
+      totalTrafficOut += n.dynamic?.total_transmitted ?? 0
+      const code = n.meta?.region?.trim().toUpperCase()
+      if (code) regions.add(code)
+    }
+
+    const totalBandwidth = totalNetIn + totalNetOut
+    const totalTraffic = totalTrafficIn + totalTrafficOut
+    const bwHistory = bandwidthHistoryRef.current
+    if (bwHistory.length === 0 || bwHistory[bwHistory.length - 1] !== totalBandwidth) {
+      bwHistory.push(totalBandwidth)
+      if (bwHistory.length > 20) bwHistory.shift()
+    }
+    const trHistory = trafficHistoryRef.current
+    if (trHistory.length === 0 || trHistory[trHistory.length - 1] !== totalTraffic) {
+      trHistory.push(totalTraffic)
+      if (trHistory.length > 20) trHistory.shift()
+    }
+    const niHistory = netInHistoryRef.current
+    if (niHistory.length === 0 || niHistory[niHistory.length - 1] !== totalNetIn) {
+      niHistory.push(totalNetIn)
+      if (niHistory.length > 20) niHistory.shift()
+    }
+
+    return {
+      onlineCount,
+      totalCount,
+      totalNetIn,
+      totalNetOut,
+      totalTrafficIn,
+      totalTrafficOut,
+      regionCount: regions.size,
+    }
+  }, [nodes])
 
   const [view, setView] = useState<View>(initialView)
   const [sort, setSort] = useState<Sort>(initialSort)
@@ -199,6 +253,20 @@ export function App() {
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
+        {!empty && (
+          <GlobalStats
+            onlineCount={globalStats.onlineCount}
+            totalCount={globalStats.totalCount}
+            totalNetIn={globalStats.totalNetIn}
+            totalNetOut={globalStats.totalNetOut}
+            totalTrafficIn={globalStats.totalTrafficIn}
+            totalTrafficOut={globalStats.totalTrafficOut}
+            regionCount={globalStats.regionCount}
+            bandwidthHistory={[...bandwidthHistoryRef.current]}
+            trafficHistory={[...trafficHistoryRef.current]}
+            netInHistory={[...netInHistoryRef.current]}
+          />
+        )}
         {!empty && (
           <RegionFilter
             regions={regions.list}
