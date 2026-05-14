@@ -83,48 +83,60 @@ export function GlobalStats({
   const netInParts = bytesParts(smoothNetIn)
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+    <div className="flex flex-col md:grid md:grid-cols-4 md:gap-3 rounded-xl border border-[#f0f0f0] dark:border-border/20 shadow-[0_1px_2px_rgba(0,0,0,0.04)] md:rounded-none md:border-none md:shadow-none overflow-hidden">
       {/* 节点概览 */}
-      <div className="flex items-center gap-4 p-5 rounded-xl border border-[#f0f0f0] dark:border-border/20 shadow-[0_1px_2px_rgba(0,0,0,0.04)] overflow-hidden">
+      <div className="flex items-center gap-3 md:gap-4 px-4 md:p-5 py-3 min-h-[48px] md:min-h-0 border-b border-border/10 md:border-b-0 last:border-b-0 md:rounded-xl md:border md:border-[#f0f0f0] md:dark:border-border/20 md:shadow-[0_1px_2px_rgba(0,0,0,0.04)] overflow-hidden">
         <Server className="shrink-0 h-4 w-4 text-emerald-500" strokeWidth={1.5} />
-        <div className="flex-1 min-w-0 flex flex-col justify-center gap-1">
-          <div className="shrink-0 text-[11px] text-muted-foreground leading-none h-[14px] flex items-center overflow-hidden">
+        <div className="flex-1 min-w-0 flex flex-row md:flex-col justify-between md:justify-center items-center md:items-start gap-0 md:gap-1">
+          <div className="text-sm md:text-[11px] text-muted-foreground md:leading-none md:h-[14px] md:flex md:items-center md:overflow-hidden">
             节点概览
           </div>
-          <div className="shrink-0 h-6 flex items-center gap-1 leading-none whitespace-nowrap overflow-hidden">
-            <span className={`text-xl font-bold ${allOnline ? 'text-green-500' : 'text-rose-500'}`}>
+          <div className="shrink-0 h-auto md:h-6 flex items-center gap-1 leading-none md:whitespace-nowrap md:overflow-hidden">
+            <span className={`text-base md:text-xl font-bold ${allOnline ? 'text-green-500' : 'text-rose-500'}`}>
               {onlineCount}
             </span>
-            <span className="text-xl text-gray-400 dark:text-gray-500 font-normal">/ {totalCount}</span>
+            <span className="text-sm md:text-xl text-gray-400 dark:text-gray-500 font-normal">/ {totalCount}</span>
           </div>
-          <div className="shrink-0 h-6 flex items-center leading-none overflow-hidden">
+          <div className="hidden md:flex shrink-0 h-6 items-center leading-none overflow-hidden">
             <span className="text-[10px] text-muted-foreground/60">Online</span>
           </div>
         </div>
-        <div className="shrink-0 w-10 h-10 flex items-center justify-center">
+        <div className="hidden md:flex shrink-0 w-10 h-10 items-center justify-center">
           <CircularProgress value={onlineRatio} colorClass={allOnline ? 'text-emerald-500' : 'text-rose-500'} />
         </div>
       </div>
 
       {/* 实时带宽 */}
-      <div className="flex items-center gap-4 p-5 rounded-xl border border-[#f0f0f0] dark:border-border/20 shadow-[0_1px_2px_rgba(0,0,0,0.04)] overflow-hidden">
+      <div className="flex items-center gap-3 md:gap-4 px-4 md:p-5 py-3 min-h-[48px] md:min-h-0 border-b border-border/10 md:border-b-0 last:border-b-0 md:rounded-xl md:border md:border-[#f0f0f0] md:dark:border-border/20 md:shadow-[0_1px_2px_rgba(0,0,0,0.04)] overflow-hidden">
         <ArrowLeftRight className="shrink-0 h-4 w-4 text-blue-500" strokeWidth={1.5} />
-        <div className="flex-1 min-w-0 flex flex-col justify-center gap-1">
-          <div className="shrink-0 text-[11px] text-muted-foreground leading-none h-[14px] flex items-center overflow-hidden">
+        <div className="flex-1 min-w-0 flex flex-row md:flex-col justify-between md:justify-center items-center md:items-start gap-0 md:gap-1">
+          <div className="text-sm md:text-[11px] text-muted-foreground md:leading-none md:h-[14px] md:flex md:items-center md:overflow-hidden">
             实时带宽
           </div>
-          <div className="shrink-0 h-6 flex items-center gap-1.5 leading-none whitespace-nowrap overflow-hidden">
+          <div className="shrink-0 md:hidden flex flex-col items-end leading-none gap-0.5">
+            <span className="flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400">
+              <ArrowUp className="h-3 w-3 shrink-0" strokeWidth={1.5} />
+              <span className="text-sm font-semibold">{netOutParts.num}</span>
+              <span className="text-[10px] font-normal">{netOutParts.unit}/s</span>
+            </span>
+            <span className="flex items-center gap-0.5 text-blue-600 dark:text-blue-400">
+              <ArrowDown className="h-3 w-3 shrink-0" strokeWidth={1.5} />
+              <span className="text-sm font-semibold">{netInParts.num}</span>
+              <span className="text-[10px] font-normal">{netInParts.unit}/s</span>
+            </span>
+          </div>
+          <div className="hidden md:flex shrink-0 h-6 items-center gap-1.5 leading-none whitespace-nowrap overflow-hidden">
             <ArrowUp className="h-4 w-4 text-emerald-500 shrink-0" strokeWidth={1.5} />
             <span className="text-xl font-bold text-emerald-600 dark:text-emerald-400">{netOutParts.num}</span>
             <span className="text-xs text-emerald-600/70 dark:text-emerald-400/70 font-normal">{netOutParts.unit}/s</span>
           </div>
-          <div className="shrink-0 h-6 flex items-center gap-1.5 leading-none whitespace-nowrap overflow-hidden">
+          <div className="hidden md:flex shrink-0 h-6 items-center gap-1.5 leading-none whitespace-nowrap overflow-hidden">
             <ArrowDown className="h-4 w-4 text-blue-500 shrink-0" strokeWidth={1.5} />
             <span className="text-xl font-bold text-blue-600 dark:text-blue-400">{netInParts.num}</span>
             <span className="text-xs text-blue-600/70 dark:text-blue-400/70 font-normal">{netInParts.unit}/s</span>
           </div>
         </div>
-        <div className="hidden sm:flex shrink-0 w-20 h-10 items-center justify-center">
+        <div className="hidden md:flex shrink-0 w-20 h-10 items-center justify-center">
           {netInHistory.length > 1 && (
             <Sparkline data={netInHistory} width={80} height={40} color="hsl(var(--primary))" />
           )}
@@ -132,17 +144,17 @@ export function GlobalStats({
       </div>
 
       {/* 流量总量 */}
-      <div className="flex items-center gap-4 p-5 rounded-xl border border-[#f0f0f0] dark:border-border/20 shadow-[0_1px_2px_rgba(0,0,0,0.04)] overflow-hidden">
+      <div className="flex items-center gap-3 md:gap-4 px-4 md:p-5 py-3 min-h-[48px] md:min-h-0 border-b border-border/10 md:border-b-0 last:border-b-0 md:rounded-xl md:border md:border-[#f0f0f0] md:dark:border-border/20 md:shadow-[0_1px_2px_rgba(0,0,0,0.04)] overflow-hidden">
         <Database className="shrink-0 h-4 w-4 text-amber-500" strokeWidth={1.5} />
-        <div className="flex-1 min-w-0 flex flex-col justify-center gap-1">
-          <div className="shrink-0 text-[11px] text-muted-foreground leading-none h-[14px] flex items-center overflow-hidden">
+        <div className="flex-1 min-w-0 flex flex-row md:flex-col justify-between md:justify-center items-center md:items-start gap-0 md:gap-1">
+          <div className="text-sm md:text-[11px] text-muted-foreground md:leading-none md:h-[14px] md:flex md:items-center md:overflow-hidden">
             流量总量
           </div>
-          <div className="shrink-0 h-6 flex items-center gap-1.5 leading-none whitespace-nowrap overflow-hidden">
-            <span className="text-xl font-bold text-foreground">{trafficParts.num}</span>
-            <span className="text-xs text-muted-foreground font-normal">{trafficParts.unit}</span>
+          <div className="shrink-0 h-auto md:h-6 flex items-center gap-1.5 leading-none md:whitespace-nowrap md:overflow-hidden">
+            <span className="text-base md:text-xl font-bold text-foreground">{trafficParts.num}</span>
+            <span className="text-sm md:text-xs text-muted-foreground font-normal">{trafficParts.unit}</span>
           </div>
-          <div className="shrink-0 h-6 flex items-center gap-2 leading-none whitespace-nowrap overflow-hidden">
+          <div className="hidden md:flex shrink-0 h-6 items-center gap-2 leading-none whitespace-nowrap overflow-hidden">
             <span className="flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400">
               <ArrowUp className="h-3 w-3 shrink-0" strokeWidth={1.5} />
               <span className="text-sm font-medium">{upParts.num}</span>
@@ -156,7 +168,7 @@ export function GlobalStats({
             </span>
           </div>
         </div>
-        <div className="hidden sm:flex shrink-0 w-20 h-10 items-center justify-center">
+        <div className="hidden md:flex shrink-0 w-20 h-10 items-center justify-center">
           {trafficHistory.length > 1 && (
             <Sparkline data={trafficHistory} width={80} height={40} color="hsl(var(--primary))" />
           )}
@@ -164,20 +176,20 @@ export function GlobalStats({
       </div>
 
       {/* 区域分布 */}
-      <div className="flex items-center gap-4 p-5 rounded-xl border border-[#f0f0f0] dark:border-border/20 shadow-[0_1px_2px_rgba(0,0,0,0.04)] overflow-hidden">
+      <div className="flex items-center gap-3 md:gap-4 px-4 md:p-5 py-3 min-h-[48px] md:min-h-0 border-b border-border/10 md:border-b-0 last:border-b-0 md:rounded-xl md:border md:border-[#f0f0f0] md:dark:border-border/20 md:shadow-[0_1px_2px_rgba(0,0,0,0.04)] overflow-hidden">
         <Globe className="shrink-0 h-4 w-4 text-violet-500" strokeWidth={1.5} />
-        <div className="flex-1 min-w-0 flex flex-col justify-center gap-1">
-          <div className="shrink-0 text-[11px] text-muted-foreground leading-none h-[14px] flex items-center overflow-hidden">
+        <div className="flex-1 min-w-0 flex flex-row md:flex-col justify-between md:justify-center items-center md:items-start gap-0 md:gap-1">
+          <div className="text-sm md:text-[11px] text-muted-foreground md:leading-none md:h-[14px] md:flex md:items-center md:overflow-hidden">
             区域分布
           </div>
-          <div className="shrink-0 h-6 flex items-center leading-none whitespace-nowrap overflow-hidden">
-            <span className="text-xl font-bold text-foreground">{regionCount}</span>
+          <div className="shrink-0 h-auto md:h-6 flex items-center leading-none md:whitespace-nowrap md:overflow-hidden">
+            <span className="text-base md:text-xl font-bold text-foreground">{regionCount}</span>
           </div>
-          <div className="shrink-0 h-6 flex items-center leading-none overflow-hidden">
+          <div className="hidden md:flex shrink-0 h-6 items-center leading-none overflow-hidden">
             <span className="text-[10px] text-muted-foreground/60">国家/地区</span>
           </div>
         </div>
-        <div className="shrink-0 w-10 h-10 flex items-center justify-center">
+        <div className="hidden md:flex shrink-0 w-10 h-10 items-center justify-center">
           <Globe className="h-10 w-10 text-primary/[0.04]" strokeWidth={1} />
         </div>
       </div>
