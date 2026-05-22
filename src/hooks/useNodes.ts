@@ -4,7 +4,7 @@ import { dynamicSummaryMulti, kvGetMulti, listAgentUuids, staticDataMulti, taskQ
 import { buildLatencyTracks } from '../utils/latency'
 import type { LatencyTracks } from '../utils/latency'
 import { isOnline } from '../utils/status'
-import type { DynamicSummary, HistorySample, Node, NodeMeta, SiteConfig } from '../types'
+import type { DynamicSummary, HistorySample, Node, NodeMeta, Site_Config } from '../types'
 
 type Agent = Pick<Node, 'uuid' | 'source' | 'meta' | 'static'>
 
@@ -119,7 +119,7 @@ function sampleFrom(row: DynamicSummary): HistorySample {
   }
 }
 
-export function useNodes(config: SiteConfig | null) {
+export function useNodes(config: Site_Config | null) {
   const [agents, setAgents] = useState<Map<string, Agent>>(new Map())
   const [live, setLive] = useState<Map<string, DynamicSummary>>(new Map())
   const [history, setHistory] = useState<Map<string, HistorySample[]>>(new Map())
