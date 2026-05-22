@@ -143,12 +143,12 @@ export function GlobalStats({
         </div>
       </div>
 
-      {/* 流量总量 */}
+      {/* 本月流量 */}
       <div className="flex items-center gap-3 md:gap-4 px-4 md:p-5 py-3 min-h-[48px] md:min-h-0 border-b border-border/10 md:border-b-0 last:border-b-0 md:rounded-xl md:border md:border-[#f0f0f0] md:dark:border-border/20 md:shadow-[0_1px_2px_rgba(0,0,0,0.04)] overflow-hidden">
         <Database className="shrink-0 h-4 w-4 text-amber-500" strokeWidth={1.5} />
         <div className="flex-1 min-w-0 flex flex-row md:flex-col justify-between md:justify-center items-center md:items-start gap-0 md:gap-1">
           <div className="text-sm md:text-[11px] text-muted-foreground md:leading-none md:h-[14px] md:flex md:items-center md:overflow-hidden">
-            流量总量
+            本月流量
           </div>
           <div className="shrink-0 h-auto md:h-6 flex items-center gap-1.5 leading-none md:whitespace-nowrap md:overflow-hidden">
             <span className="text-base md:text-xl font-bold text-foreground">{trafficParts.num}</span>

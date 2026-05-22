@@ -87,6 +87,20 @@ export interface Node {
   static: StaticData
   dynamic: DynamicSummary | null
   history: HistorySample[]
+  monthlyTraffic?: MonthlyTraffic
+}
+
+export interface MonthlyTraffic {
+  month: string
+  received: number
+  transmitted: number
+  lastReceived?: number
+  lastTransmitted?: number
+  total: number
+  limit?: number
+  percent?: number
+  startedAt: number
+  updatedAt: number
 }
 
 export interface ThemeConfig {

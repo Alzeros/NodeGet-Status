@@ -61,8 +61,8 @@ export function App() {
       if (n.online) onlineCount++
       totalNetIn += n.dynamic?.receive_speed ?? 0
       totalNetOut += n.dynamic?.transmit_speed ?? 0
-      totalTrafficIn += n.dynamic?.total_received ?? 0
-      totalTrafficOut += n.dynamic?.total_transmitted ?? 0
+      totalTrafficIn += n.monthlyTraffic?.received ?? 0
+      totalTrafficOut += n.monthlyTraffic?.transmitted ?? 0
       const code = n.meta?.region?.trim().toUpperCase()
       if (code) regions.add(code)
     }

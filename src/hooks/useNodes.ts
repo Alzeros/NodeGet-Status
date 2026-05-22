@@ -4,7 +4,7 @@ import { dynamicSummaryMulti, kvGetMulti, listAgentUuids, staticDataMulti, taskQ
 import { buildLatencyTracks } from '../utils/latency'
 import type { LatencyTracks } from '../utils/latency'
 import { isOnline } from '../utils/status'
-import type { DynamicSummary, HistorySample, Node, NodeMeta, Site_Config } from '../types'
+import type { DynamicSummary, HistorySample, MonthlyTraffic, Node, NodeMeta, Site_Config } from '../types'
 
 type Agent = Pick<Node, 'uuid' | 'source' | 'meta' | 'static'>
 
@@ -57,6 +57,17 @@ const DYN_INTERVAL_MS = 2000
 const LATENCY_INTERVAL_MS = 30_000
 const LATENCY_QUERY_TIMEOUT = 10_000
 const HISTORY_LIMIT = 60
+const MONTHLY_TRAFFIC_KEY_PREFIX = 'metadata_monthly_traffic:'
+
+interface MonthlyTrafficRecord {
+  month: string
+  received: number
+  transmitted: number
+  lastReceived?: number
+  lastTransmitted?: number
+  startedAt: number
+  updatedAt: number
+}
 
 function emptyMeta(): NodeMeta {
   return {
@@ -79,13 +90,120 @@ function blankAgent(uuid: string, source: string): Agent {
   return { uuid, source, meta: emptyMeta(), static: {} }
 }
 
+function monthlyTrafficMapKey(source: string, uuid: string) {
+  return `${source}:${uuid}`
+}
+
+function currentMonth() {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+}
+
+function monthlyTrafficKvKey(month: string) {
+  return `${MONTHLY_TRAFFIC_KEY_PREFIX}${month}`
+}
+
+function parseMonthlyTrafficRecord(raw: unknown, month: string): MonthlyTrafficRecord | null {
+  try {
+    const value = typeof raw === 'string' ? JSON.parse(raw) : raw
+    if (!value || typeof value !== 'object') return null
+    const record = value as Partial<MonthlyTrafficRecord>
+    if (record.month !== month) return null
+    return {
+      month,
+      received: Number(record.received) || 0,
+      transmitted: Number(record.transmitted) || 0,
+      lastReceived: Number.isFinite(record.lastReceived) ? Number(record.lastReceived) : undefined,
+      lastTransmitted: Number.isFinite(record.lastTransmitted) ? Number(record.lastTransmitted) : undefined,
+      startedAt: Number(record.startedAt) || Date.now(),
+      updatedAt: Number(record.updatedAt) || 0,
+    }
+  } catch {
+    return null
+  }
+}
+
+function validTotal(value?: number | null) {
+  return Number.isFinite(value) && value! >= 0 ? value! : undefined
+}
+
+function toMonthlyTraffic(record: MonthlyTrafficRecord): MonthlyTraffic {
+  const received = validTotal(record.received) ?? 0
+  const transmitted = validTotal(record.transmitted) ?? 0
+  return {
+    month: record.month,
+    received,
+    transmitted,
+    lastReceived: record.lastReceived,
+    lastTransmitted: record.lastTransmitted,
+    total: received + transmitted,
+    startedAt: record.startedAt,
+    updatedAt: record.updatedAt,
+  }
+}
+
+function trafficDelta(current: number | undefined, previous: number | undefined) {
+  if (current == null || previous == null) return 0
+  return current >= previous ? current - previous : current
+}
+
+function previewMonthlyTraffic(record: MonthlyTraffic, row: DynamicSummary | null): MonthlyTraffic {
+  if (!row) return record
+
+  const currentReceived = validTotal(row.total_received)
+  const currentTransmitted = validTotal(row.total_transmitted)
+  const received = record.received + trafficDelta(currentReceived, record.lastReceived)
+  const transmitted = record.transmitted + trafficDelta(currentTransmitted, record.lastTransmitted)
+
+  return {
+    ...record,
+    received,
+    transmitted,
+    total: received + transmitted,
+  }
+}
+
+function parseTrafficLimit(raw: unknown) {
+  if (raw == null || raw === '') return undefined
+  if (typeof raw === 'number') return Number.isFinite(raw) && raw > 0 ? raw : undefined
+
+  const value = String(raw).trim()
+  const match = value.match(/^(\d+(?:\.\d+)?)\s*([kmgtp]?i?b?|[kmgtp])?$/i)
+  if (!match) return undefined
+
+  const num = Number(match[1])
+  if (!Number.isFinite(num) || num <= 0) return undefined
+
+  const unit = (match[2] || 'b').toLowerCase()
+  const powers: Record<string, number> = {
+    b: 0,
+    k: 1,
+    kb: 1,
+    kib: 1,
+    m: 2,
+    mb: 2,
+    mib: 2,
+    g: 3,
+    gb: 3,
+    gib: 3,
+    t: 4,
+    tb: 4,
+    tib: 4,
+    p: 5,
+    pb: 5,
+    pib: 5,
+  }
+  const power = powers[unit]
+  return power == null ? undefined : num * 1024 ** power
+}
+
 function parseMeta(raw: Record<string, unknown>): NodeMeta {
   const lat = Number(raw.metadata_latitude)
   const lng = Number(raw.metadata_longitude)
   const order = Number(raw.metadata_order)
   const price = Number(raw.metadata_price)
   const cycle = Number(raw.metadata_price_cycle)
-  const trafficLimit = Number(raw.metadata_traffic_limit)
+  const trafficLimit = parseTrafficLimit(raw.metadata_traffic_limit)
   return {
     name: raw.metadata_name ? String(raw.metadata_name) : '',
     region: raw.metadata_region ? String(raw.metadata_region) : '',
@@ -99,7 +217,7 @@ function parseMeta(raw: Record<string, unknown>): NodeMeta {
     priceUnit: raw.metadata_price_unit ? String(raw.metadata_price_unit) : '$',
     priceCycle: Number.isFinite(cycle) && cycle > 0 ? cycle : 30,
     expireTime: raw.metadata_expire_time ? String(raw.metadata_expire_time) : '',
-    trafficLimit: Number.isFinite(trafficLimit) && trafficLimit > 0 ? trafficLimit : undefined,
+    trafficLimit,
   }
 }
 
@@ -128,6 +246,7 @@ export function useNodes(config: Site_Config | null) {
   const [tick, setTick] = useState(0)
   const [pool, setPool] = useState<BackendPool | null>(null)
   const [latencyTracks, setLatencyTracks] = useState<Map<string, LatencyTracks>>(new Map())
+  const [monthlyTraffic, setMonthlyTraffic] = useState<Map<string, MonthlyTraffic>>(new Map())
 
   const agentsRef = useRef(agents)
   useEffect(() => { agentsRef.current = agents }, [agents])
@@ -140,6 +259,33 @@ export function useNodes(config: Site_Config | null) {
     const pool = new BackendPool(config.site_tokens)
     setPool(pool)
     const sourceUuids = new Map<string, string[]>()
+    const loadMonthlyTraffic = async (
+      entry: { name: string; client: BackendPool['entries'][number]['client'] },
+      rows: DynamicSummary[],
+    ) => {
+      const month = currentMonth()
+      const kvKey = monthlyTrafficKvKey(month)
+      const items = rows
+        .filter(row => row.uuid)
+        .map(row => ({ namespace: row.uuid, key: kvKey }))
+      if (!items.length) return
+
+      const records = await kvGetMulti(entry.client, items).catch(() => [])
+      const updates = new Map<string, MonthlyTraffic>()
+      for (const row of records) {
+        const record = parseMonthlyTrafficRecord(row.value, month)
+        if (!record) continue
+        updates.set(monthlyTrafficMapKey(entry.name, row.namespace), toMonthlyTraffic(record))
+      }
+
+      if (updates.size) {
+        setMonthlyTraffic(prev => {
+          const next = new Map(prev)
+          for (const [key, value] of updates) next.set(key, value)
+          return next
+        })
+      }
+    }
 
     const bootstrap = async () => {
       const agentsRes = await pool.fanout(listAgentUuids)
@@ -224,6 +370,7 @@ export function useNodes(config: Site_Config | null) {
           try {
             const rows = await dynamicSummaryMulti(entry.client, uuids, DYNAMIC_FIELDS)
             for (const row of rows || []) updates.push(row)
+            loadMonthlyTraffic(entry, rows || []).catch(() => {})
           } catch {}
         }),
       )
@@ -322,15 +469,26 @@ export function useNodes(config: Site_Config | null) {
     const out = new Map<string, Node>()
     for (const [uuid, a] of agents) {
       const dyn = live.get(uuid) || null
+      const traffic = monthlyTraffic.get(monthlyTrafficMapKey(a.source, uuid))
+      const trafficLimit = a.meta?.trafficLimit
+      const trafficPreview = traffic ? previewMonthlyTraffic(traffic, dyn) : undefined
+      const nodeMonthlyTraffic = trafficPreview
+        ? {
+            ...trafficPreview,
+            limit: trafficLimit,
+            percent: trafficLimit && trafficLimit > 0 ? (trafficPreview.total / trafficLimit) * 100 : undefined,
+          }
+        : undefined
       out.set(uuid, {
         ...a,
         dynamic: dyn,
         history: history.get(uuid) || [],
         online: isOnline(dyn?.timestamp, now),
+        monthlyTraffic: nodeMonthlyTraffic,
       })
     }
     return out
-  }, [agents, live, history, tick])
+  }, [agents, live, history, monthlyTraffic, tick])
 
   return { nodes, errors, loading, pool, latencyTracks }
 }

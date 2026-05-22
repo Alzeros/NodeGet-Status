@@ -27,6 +27,7 @@ export function NodeTable({ nodes, onOpen }: Props) {
             <TableHead>CPU</TableHead>
             <TableHead>内存</TableHead>
             <TableHead>磁盘</TableHead>
+            <TableHead>本月流量</TableHead>
             <TableHead>下行</TableHead>
             <TableHead>上行</TableHead>
             <TableHead>更新</TableHead>
@@ -37,6 +38,7 @@ export function NodeTable({ nodes, onOpen }: Props) {
             const u = deriveUsage(n)
             const logo = distroLogo(n)
             const virt = virtLabel(n)
+            const monthlyTraffic = n.monthlyTraffic
             return (
               <TableRow
                 key={n.uuid}
@@ -90,6 +92,19 @@ export function NodeTable({ nodes, onOpen }: Props) {
                     hint={u.diskTotal ? `${bytes(u.diskUsed)} / ${bytes(u.diskTotal)}` : null}
                   />
                 </TableCell>
+                <TableCell>
+                  <CellBar
+                    value={monthlyTraffic?.percent}
+                    hint={
+                      monthlyTraffic
+                        ? monthlyTraffic.limit
+                          ? `${bytes(monthlyTraffic.total)} / ${bytes(monthlyTraffic.limit)}`
+                          : bytes(monthlyTraffic.total)
+                        : null
+                    }
+                    label={monthlyTraffic ? bytes(monthlyTraffic.total) : '0 B'}
+                  />
+                </TableCell>
                 <TableCell className="font-mono">{bytes(u.netIn || 0)}/s</TableCell>
                 <TableCell className="font-mono">{bytes(u.netOut || 0)}/s</TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground">
@@ -104,11 +119,21 @@ export function NodeTable({ nodes, onOpen }: Props) {
   )
 }
 
-function CellBar({ value, hint }: { value: number | undefined; hint?: string | null }) {
+function CellBar({
+  value,
+  hint,
+  label,
+}: {
+  value: number | undefined
+  hint?: string | null
+  label?: string
+}) {
   return (
     <div className="flex items-center gap-2 min-w-[110px]" title={hint || ''}>
       <Progress value={value} indicatorClassName={loadColor(value)} className="flex-1 h-1.5" />
-      <span className="font-mono text-xs w-12 text-right">{pct(value)}</span>
+      <span className={cn('font-mono text-xs text-right', label ? 'w-16' : 'w-12')}>
+        {label ?? pct(value)}
+      </span>
     </div>
   )
 }

@@ -102,6 +102,17 @@ export function NodeDetail({ node, onClose, showSource, pool }: Props) {
       ? `${d.load_one.toFixed(2)} / ${d.load_five.toFixed(2)} / ${d.load_fifteen.toFixed(2)}`
       : null
   const history = node.history || []
+  const monthlyTraffic = node.monthlyTraffic
+  const monthlyTrafficLimit = monthlyTraffic?.limit
+  const monthlyTrafficPercent = monthlyTraffic?.percent
+  const monthlyTrafficBar =
+    monthlyTrafficPercent == null
+      ? 'bg-muted-foreground/40'
+      : monthlyTrafficPercent >= 90
+        ? 'bg-rose-500'
+        : monthlyTrafficPercent >= 70
+          ? 'bg-amber-500'
+          : 'bg-emerald-500'
 
   return (
     <div
@@ -330,6 +341,30 @@ export function NodeDetail({ node, onClose, showSource, pool }: Props) {
           </Section>
 
           <Section title="网络与负载">
+            <KV
+              k="本月流量"
+              v={
+                monthlyTraffic
+                  ? monthlyTrafficLimit
+                    ? `${bytes(monthlyTraffic.total)} / ${bytes(monthlyTrafficLimit)}`
+                    : bytes(monthlyTraffic.total)
+                  : null
+              }
+            />
+            <KV k="本月接收" v={monthlyTraffic ? bytes(monthlyTraffic.received) : null} />
+            <KV k="本月发送" v={monthlyTraffic ? bytes(monthlyTraffic.transmitted) : null} />
+            <KV
+              k="本月占比"
+              v={monthlyTrafficPercent != null ? pct(monthlyTrafficPercent) : null}
+            />
+            {monthlyTrafficPercent != null && (
+              <div className="my-2 h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                <div
+                  className={cn('h-full rounded-full transition-all', monthlyTrafficBar)}
+                  style={{ width: `${Math.max(0, Math.min(100, monthlyTrafficPercent))}%` }}
+                />
+              </div>
+            )}
             <KV k="累计接收" v={d?.total_received != null ? bytes(d.total_received) : null} />
             <KV k="累计发送" v={d?.total_transmitted != null ? bytes(d.total_transmitted) : null} />
             <KV k="磁盘读" v={d?.read_speed != null ? `${bytes(d.read_speed)}/s` : null} />

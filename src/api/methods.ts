@@ -15,6 +15,19 @@ export const kvGetMulti = (
   items: { namespace: string; key: string }[],
 ) => c.call<{ namespace: string; key: string; value: unknown }[]>('kv_get_multi_value', { namespace_key: items })
 
+export const kvGetValue = (
+  c: RpcClient,
+  namespace: string,
+  key: string,
+) => c.call<unknown>('kv_get_value', { namespace, key })
+
+export const kvSetValue = (
+  c: RpcClient,
+  namespace: string,
+  key: string,
+  value: unknown,
+) => c.call<unknown>('kv_set_value', { namespace, key, value })
+
 export const taskQuery = (
   c: RpcClient,
   conditions: TaskQueryCondition[],

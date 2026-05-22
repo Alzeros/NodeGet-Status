@@ -37,7 +37,17 @@ export function NodeCard({ node, latencyTracks }: NodeCardProps) {
   const hasNetworkQuality = latencyTracks && (latencyTracks.cm || latencyTracks.cu || latencyTracks.ct)
 
   // --- 指标模板配置 (动态渲染) ---
-  const totalTraffic = (u.trafficOut ?? 0) + (u.trafficIn ?? 0)
+  const monthlyTraffic = node.monthlyTraffic
+  const trafficIn = monthlyTraffic?.received ?? 0
+  const trafficOut = monthlyTraffic?.transmitted ?? 0
+  const totalTraffic = trafficIn + trafficOut
+  const trafficLimit = monthlyTraffic?.limit
+  const trafficPercent = monthlyTraffic?.percent
+  const trafficDetail = trafficLimit
+    ? `${bytes(totalTraffic)} / ${bytes(trafficLimit)}`
+    : monthlyTraffic
+      ? `本月: ${bytes(totalTraffic)}`
+      : '等待定时采样'
 
   const resourceMetrics: ResourceMetricItem[] = [
     {
@@ -61,15 +71,18 @@ export function NodeCard({ node, latencyTracks }: NodeCardProps) {
     },
     {
       id: 'traffic',
-      label: '累计流量',
+      label: '本月流量',
       valueNode: (
-        <span title={`Total: ${bytes(totalTraffic)}`}>
-          <span className="text-emerald-500">↑ {bytes(u.trafficOut ?? 0)}</span>
+        <span title={trafficDetail}>
+          <span className="text-emerald-500">↑ {bytes(trafficOut)}</span>
           <span className="text-muted-foreground mx-1">|</span>
-          <span className="text-blue-500">↓ {bytes(u.trafficIn ?? 0)}</span>
+          <span className="text-blue-500">↓ {bytes(trafficIn)}</span>
         </span>
       ),
-      detail: totalTraffic > 0 ? `Total: ${bytes(totalTraffic)}` : null,
+      percent: trafficPercent,
+      barClassName: loadColor(trafficPercent),
+      detail: totalTraffic > 0 || trafficLimit || !monthlyTraffic ? trafficDetail : null,
+      detailTitle: trafficLimit ? `本月流量上限: ${bytes(trafficLimit)}` : undefined,
     },
 
   ]
