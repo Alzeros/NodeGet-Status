@@ -130,7 +130,7 @@ export interface UserConfig {
   }[]
 }
 
-export type Site_Config = ThemeConfig & UserConfig
+export type SiteConfig = ThemeConfig & UserConfig
 
 export interface TaskQueryResult {
   task_id: number

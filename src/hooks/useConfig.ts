@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
-import type { Site_Config } from '../types'
+import type { SiteConfig } from '../types'
 import { useUserConfig } from "./useUserConfig"
 import { useThemeConfig } from "./useThemeConfig"
 
 export function useConfig(){
   const { config: userConfig, error: userError } = useUserConfig()
   const { config: themeConfig, error: themeError } = useThemeConfig()
-  const [config, setConfig] = useState<Site_Config | null>(null)
+  const [config, setConfig] = useState<SiteConfig | null>(null)
   const [error, setError] = useState<Error | null>(null)
 
   useEffect(() => {
@@ -22,7 +22,7 @@ export function useConfig(){
 
     // 两个配置都加载成功后，合并它们
     if (userConfig && themeConfig) {
-      const merged = { ...themeConfig, ...userConfig } as Site_Config
+      const merged = { ...themeConfig, ...userConfig } as SiteConfig
       setConfig(merged)
       setError(null)
     }
