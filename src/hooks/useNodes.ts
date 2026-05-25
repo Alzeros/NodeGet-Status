@@ -203,7 +203,7 @@ function parseMeta(raw: Record<string, unknown>): NodeMeta {
   const order = Number(raw.metadata_order)
   const price = Number(raw.metadata_price)
   const cycle = Number(raw.metadata_price_cycle)
-  const trafficLimit = parseTrafficLimit(raw.metadata_traffic_limit)
+  const trafficLimit = parseTrafficLimit(raw.metadata_traffic_limit) ?? (500 * 1024 ** 3)
   return {
     name: raw.metadata_name ? String(raw.metadata_name) : '',
     region: raw.metadata_region ? String(raw.metadata_region) : '',
