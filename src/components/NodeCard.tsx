@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Clock, type LucideIcon } from 'lucide-react'
+import { ArrowDown, ArrowUp, Clock, Info, type LucideIcon } from 'lucide-react'
 import { Badge } from './ui/badge'
 import { Card } from './ui/card'
 import { Progress } from './ui/progress'
@@ -129,9 +129,10 @@ export function NodeCard({ node, latencyTracks }: NodeCardProps) {
               align={m.align}
             />
           ))}
-          {hasNetworkQuality && (
-            <div className="flex flex-col gap-[4px]">
-              <span className="text-xs text-muted-foreground">网络质量 (30min)</span>
+          {/* 网络质量区域 — 始终渲染以保持卡片底部对齐 */}
+          <div className="flex flex-col gap-[4px]">
+            <span className="text-xs text-muted-foreground">网络质量 (30min)</span>
+            {hasNetworkQuality ? (
               <div className="flex flex-col gap-[4px] w-full">
                 {(['cm', 'cu', 'ct'] as IspKey[]).map(ispKey => {
                   const track = latencyTracks?.[ispKey]
@@ -169,8 +170,13 @@ export function NodeCard({ node, latencyTracks }: NodeCardProps) {
                   )
                 })}
               </div>
-            </div>
-          )}
+            ) : (
+              <div className="h-[80px] flex items-center justify-center gap-1.5 text-muted-foreground/40">
+                <Info className="h-3.5 w-3.5" />
+                <span className="text-xs">此服务器未开启ICMP ping监控</span>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Footer Stats */}
