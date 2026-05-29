@@ -166,7 +166,7 @@ export function WorldMap({ nodes, onOpen }: Props) {
     liveRef.current = { byCountry, onOpen }
   })
 
-  const option = useMemo(() => buildOption(byCountry), [dataSig])
+  const option = useMemo(() => buildOption(byCountry), [dataSig, ready])
 
   useEffect(() => {
     if (!ready || !wrapRef.current) return
@@ -276,8 +276,8 @@ function buildOption(byCountry: Map<string, CountryEntry>) {
     backgroundColor: 'transparent',
     visualMap: {
       type: 'continuous' as const,
-      min: 1,
-      max: Math.max(max, 1),
+      min: max > 1 ? 1 : 0,
+      max: Math.max(max, 2),
       show: max > 0,
       seriesIndex: 0,
       left: 16,
