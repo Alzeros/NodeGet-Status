@@ -19,6 +19,14 @@ export function strokeColor(v?: number | null) {
   return 'stroke-emerald-500'
 }
 
+export function getStatusColor(online: number, total: number) {
+  if (total <= 0) return { text: 'text-muted-foreground', ring: 'text-muted-foreground/30' }
+  if (online === total) return { text: 'text-green-500', ring: 'text-emerald-500' }
+  const ratio = online / total
+  if (ratio >= 0.8) return { text: 'text-amber-500', ring: 'text-amber-500' }
+  return { text: 'text-rose-500', ring: 'text-rose-500' }
+}
+
 export const REGION_BASELINE: Record<string, number> = {
   US: 220,
   HK: 80,

@@ -2,6 +2,7 @@ import { ArrowDown, ArrowLeftRight, ArrowUp, Database, Globe, Server } from 'luc
 import { useSmoothNumber } from '../hooks/useSmoothNumber'
 import { bytesParts } from '../utils/format'
 import { Sparkline } from './Sparkline'
+import { getStatusColor } from '../utils/cn'
 
 interface Props {
   onlineCount: number
@@ -80,6 +81,7 @@ export function GlobalStats({
 
   const allOnline = onlineCount === totalCount && totalCount > 0
   const onlineRatio = totalCount > 0 ? onlineCount / totalCount : 0
+  const statusColor = getStatusColor(onlineCount, totalCount)
 
   const trafficTotal = totalTrafficIn + totalTrafficOut
   const trafficParts = bytesParts(trafficTotal)
@@ -100,12 +102,12 @@ export function GlobalStats({
             </div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1">
-                <span className={`text-2xl font-bold ${allOnline ? 'text-green-500' : 'text-rose-500'}`}>
+                <span className={`text-2xl font-bold ${statusColor.text}`}>
                   {onlineCount}
                 </span>
                 <span className="text-lg text-gray-400 dark:text-gray-500 font-normal">/ {totalCount}</span>
               </div>
-              <CircularProgress value={onlineRatio} colorClass={allOnline ? 'text-emerald-500' : 'text-rose-500'} size={36} />
+              <CircularProgress value={onlineRatio} colorClass={statusColor.ring} size={36} />
             </div>
             <span className="text-[10px] text-muted-foreground/60">Online</span>
           </div>
@@ -190,7 +192,7 @@ export function GlobalStats({
             节点概览
           </div>
           <div className="shrink-0 h-auto md:h-6 flex items-center gap-1 leading-none md:whitespace-nowrap md:overflow-hidden">
-            <span className={`text-base md:text-xl font-bold ${allOnline ? 'text-green-500' : 'text-rose-500'}`}>
+            <span className={`text-base md:text-xl font-bold ${statusColor.text}`}>
               {onlineCount}
             </span>
             <span className="text-sm md:text-xl text-gray-400 dark:text-gray-500 font-normal">/ {totalCount}</span>
@@ -200,7 +202,7 @@ export function GlobalStats({
           </div>
         </div>
         <div className="hidden md:flex shrink-0 w-10 h-10 items-center justify-center">
-          <CircularProgress value={onlineRatio} colorClass={allOnline ? 'text-emerald-500' : 'text-rose-500'} />
+          <CircularProgress value={onlineRatio} colorClass={statusColor.ring} />
         </div>
       </div>
 

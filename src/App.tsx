@@ -12,7 +12,7 @@ import { NodeTable } from './components/NodeTable'
 import { NodeDetail } from './components/NodeDetail'
 import { TagFilter } from './components/TagFilter'
 import { RegionFilter } from './components/RegionFilter'
-import { cn } from './utils/cn'
+import { cn, getStatusColor } from './utils/cn'
 
 const WorldMap = lazy(() =>
   import('./components/WorldMap').then(m => ({ default: m.WorldMap })),
@@ -273,19 +273,24 @@ export function App() {
                     <Server className="shrink-0 h-4 w-4 text-emerald-500" strokeWidth={1.5} />
                     <span className="text-[11px] text-muted-foreground font-medium">节点状态</span>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1">
-                      <span className={`text-2xl font-bold ${globalStats.onlineCount === globalStats.totalCount && globalStats.totalCount > 0 ? 'text-green-500' : 'text-rose-500'}`}>
-                        {globalStats.onlineCount}
-                      </span>
-                      <span className="text-lg text-gray-400 dark:text-gray-500 font-normal">/ {globalStats.totalCount}</span>
-                    </div>
-                    <CircularProgress
-                      value={globalStats.totalCount > 0 ? globalStats.onlineCount / globalStats.totalCount : 0}
-                      colorClass={globalStats.onlineCount === globalStats.totalCount && globalStats.totalCount > 0 ? 'text-emerald-500' : 'text-rose-500'}
-                      size={36}
-                    />
-                  </div>
+                  {(() => {
+                    const statusColor = getStatusColor(globalStats.onlineCount, globalStats.totalCount)
+                    return (
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1">
+                          <span className={cn("text-2xl font-bold", statusColor.text)}>
+                            {globalStats.onlineCount}
+                          </span>
+                          <span className="text-lg text-gray-400 dark:text-gray-500 font-normal">/ {globalStats.totalCount}</span>
+                        </div>
+                        <CircularProgress
+                          value={globalStats.totalCount > 0 ? globalStats.onlineCount / globalStats.totalCount : 0}
+                          colorClass={statusColor.ring}
+                          size={36}
+                        />
+                      </div>
+                    )
+                  })()}
                   <div className="flex items-center justify-between mt-1 text-[10px] text-muted-foreground/60 leading-none">
                     <span>Online</span>
                     <span>解锁地区: {globalStats.regionCount} 个</span>
@@ -349,7 +354,7 @@ export function App() {
           {/* 右侧主内容区 */}
           <div className="flex-1 min-w-0">
             {!selectedNode ? (
-              <div className="space-y-6 animate-in fade-in duration-200">
+              <div className="flex flex-col gap-6 animate-in fade-in duration-200">
                 {/* 小屏幕下显示原始堆叠布局 */}
                 {!empty && (
                   <div className="lg:hidden">
