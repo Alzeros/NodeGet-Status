@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react'
+import { ArrowRight, ChevronDown, ChevronUp } from 'lucide-react'
 import {
   Area,
   AreaChart,
@@ -59,24 +59,20 @@ export function NodeDetail({ node, onClose, showSource, pool }: Props) {
       if (e.key === 'Escape') onClose()
     }
     document.addEventListener('keydown', onKey)
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
     return () => {
       document.removeEventListener('keydown', onKey)
-      document.body.style.overflow = prev
     }
   }, [node, onClose])
 
   useEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
     setStuck(false)
     const onScroll = () => {
-      const h = headerRef.current?.offsetHeight ?? 60
-      setStuck(el.scrollTop > h)
+      const offsetTop = headerRef.current?.offsetTop ?? 60
+      setStuck(window.scrollY > offsetTop - 60)
     }
-    el.addEventListener('scroll', onScroll, { passive: true })
-    return () => el.removeEventListener('scroll', onScroll)
+    onScroll()
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
   }, [node])
 
   const { pingData, tcpData, loading: latencyLoading, initialized: latencyInitialized } = useNodeLatency(
@@ -117,19 +113,19 @@ export function NodeDetail({ node, onClose, showSource, pool }: Props) {
   return (
     <div
       ref={scrollRef}
-      className="fixed inset-0 z-50 bg-background overflow-y-auto animate-in fade-in duration-150"
+      className="w-full bg-card text-card-foreground rounded-2xl border border-[#f0f0f0] dark:border-border/10 shadow-[0_4px_20px_rgba(0,0,0,0.03)] animate-in slide-in-from-right fade-in duration-300"
     >
       <div
         ref={headerRef}
-        className={`sticky top-0 z-10 transition-[background-color,backdrop-filter,border-color] duration-200 ${
+        className={`sticky top-[60px] z-10 rounded-t-2xl transition-[background-color,backdrop-filter,border-color] duration-200 bg-card/90 backdrop-blur-md ${
           stuck
-            ? 'border-b border-border/40 backdrop-blur bg-background/70'
+            ? 'border-b border-border/40 shadow-sm'
             : 'border-b border-transparent'
         }`}
       >
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center gap-2 sm:gap-3">
-          <Button variant="ghost" size="icon" onClick={onClose} aria-label="返回" className="shrink-0">
-            <ArrowLeft className="h-4 w-4" />
+        <div className="w-full px-4 sm:px-6 py-3 flex flex-wrap items-center gap-2 sm:gap-3">
+          <Button variant="ghost" size="icon" onClick={onClose} aria-label="收起" className="shrink-0">
+            <ArrowRight className="h-4 w-4" />
           </Button>
           <StatusDot online={node.online} />
           {logo && (
@@ -157,7 +153,7 @@ export function NodeDetail({ node, onClose, showSource, pool }: Props) {
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-8">
+      <div className="w-full px-4 sm:px-6 py-6 sm:py-8 space-y-8">
         <Section title="资源">
           <div className="flex flex-wrap justify-around gap-4 sm:gap-6">
             <Ring label="CPU" value={u.cpu} sub={loadAvg ?? undefined} />

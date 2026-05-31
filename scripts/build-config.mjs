@@ -8,18 +8,11 @@ const envLocalPath = resolve(projectRoot, '.env.local')
 
 if (existsSync(envLocalPath)) {
   const content = readFileSync(envLocalPath, 'utf-8')
-  for (const line of content.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed || trimmed.startsWith('#')) continue
-
-    const eq = trimmed.indexOf('=')
-    if (eq === -1) continue
-
-    const key = trimmed.slice(0, eq).trim()
-    let value = trimmed.slice(eq + 1).trim()
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1)
-    }
+  const regex = /^\s*([A-Za-z0-9_]+)\s*=\s*(?:'([^']*)'|"([^"]*)"|([^#\r\n]*))/gm
+  let match
+  while ((match = regex.exec(content)) !== null) {
+    const key = match[1]
+    const value = match[2] !== undefined ? match[2] : (match[3] !== undefined ? match[3] : match[4].trim())
     if (key && process.env[key] === undefined) {
       process.env[key] = value
     }

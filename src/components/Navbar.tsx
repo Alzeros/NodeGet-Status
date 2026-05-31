@@ -47,7 +47,7 @@ export function Navbar({ siteName, logo, query, onQuery, view, onView, sort, onS
           : 'border-b border-transparent'
       }`}
     >
-      <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 px-4 sm:px-6 py-3">
+      <div className="max-w-[1600px] mx-auto flex items-center justify-between gap-2 px-6 sm:px-8 lg:px-12 xl:px-16 py-3">
         <a
           href="./"
           className="flex items-center gap-2 min-w-0 shrink-0 hover:opacity-80 transition-opacity"

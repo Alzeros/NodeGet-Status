@@ -1,17 +1,18 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Loader2 } from 'lucide-react'
+import { AlertTriangle, ChevronDown, Loader2, Server } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from './components/ui/alert'
 import { useConfig } from './hooks/useConfig'
 import { useNodes } from './hooks/useNodes'
 import { Background } from './components/Background'
 import { Navbar } from './components/Navbar'
 import { Footer } from './components/Footer'
-import { GlobalStats } from './components/GlobalStats'
+import { GlobalStats, CircularProgress } from './components/GlobalStats'
 import { NodeCard } from './components/NodeCard'
 import { NodeTable } from './components/NodeTable'
 import { NodeDetail } from './components/NodeDetail'
 import { TagFilter } from './components/TagFilter'
 import { RegionFilter } from './components/RegionFilter'
+import { cn } from './utils/cn'
 
 const WorldMap = lazy(() =>
   import('./components/WorldMap').then(m => ({ default: m.WorldMap })),
@@ -102,6 +103,7 @@ export function App() {
   const [activeTag, setActiveTag] = useState<string | null>(null)
   const [activeRegion, setActiveRegion] = useState<string | null>(null)
   const [selected, setSelected] = useState<string | null>(readHash)
+  const [regionsExpanded, setRegionsExpanded] = useState(true)
 
   useEffect(() => {
     localStorage.setItem(VIEW_KEY, view)
@@ -110,6 +112,12 @@ export function App() {
   useEffect(() => {
     localStorage.setItem(SORT_KEY, sort)
   }, [sort])
+
+  useEffect(() => {
+    if (selected) {
+      window.scrollTo({ top: 0, behavior: 'instant' })
+    }
+  }, [selected])
 
   useEffect(() => {
     const onHash = () => setSelected(readHash())
@@ -201,6 +209,7 @@ export function App() {
       else if (sort === 'netIn') cmp = num(ub.netIn) - num(ua.netIn)
       else if (sort === 'netOut') cmp = num(ub.netOut) - num(ua.netOut)
       else if (sort === 'uptime') cmp = num(ub.uptime) - num(ua.uptime)
+      else if (sort === 'traffic') cmp = num(b.monthlyTraffic?.total) - num(a.monthlyTraffic?.total)
       else if (sort === 'region') {
         const ar = rank.get(a.meta?.region?.trim().toUpperCase() || '') ?? Infinity
         const br = rank.get(b.meta?.region?.trim().toUpperCase() || '') ?? Infinity
@@ -252,88 +261,188 @@ export function App() {
         onSort={setSort}
       />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
-        {!empty && (
-          <GlobalStats
-            onlineCount={globalStats.onlineCount}
-            totalCount={globalStats.totalCount}
-            totalNetIn={globalStats.totalNetIn}
-            totalNetOut={globalStats.totalNetOut}
-            totalTrafficIn={globalStats.totalTrafficIn}
-            totalTrafficOut={globalStats.totalTrafficOut}
-            regionCount={globalStats.regionCount}
-            bandwidthHistory={[...bandwidthHistoryRef.current]}
-            trafficHistory={[...trafficHistoryRef.current]}
-            netInHistory={[...netInHistoryRef.current]}
-          />
-        )}
-        {!empty && (
-          <RegionFilter
-            regions={regions.list}
-            total={regions.total}
-            active={activeRegion}
-            onChange={setActiveRegion}
-          />
-        )}
-        {!empty && <TagFilter tags={allTags} active={activeTag} onChange={setActiveTag} />}
+      <main className="flex-1 w-full max-w-[1600px] mx-auto px-6 sm:px-8 lg:px-12 xl:px-16 py-6 sm:py-8">
+        <div className="flex gap-6">
+          {/* 左侧固定侧边栏 - 仅 lg 以上显示 */}
+          {!empty && (
+            <aside className="hidden lg:block w-[260px] shrink-0">
+              <div className="sticky top-[60px] space-y-3 max-h-[calc(100vh-80px)] overflow-y-auto sidebar-scroll pb-4">
+                {/* 节点状态与地区筛选合并卡片 */}
+                <div className="rounded-xl border border-[#f0f0f0] dark:border-border/20 shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4 bg-card text-card-foreground">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Server className="shrink-0 h-4 w-4 text-emerald-500" strokeWidth={1.5} />
+                    <span className="text-[11px] text-muted-foreground font-medium">节点状态</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1">
+                      <span className={`text-2xl font-bold ${globalStats.onlineCount === globalStats.totalCount && globalStats.totalCount > 0 ? 'text-green-500' : 'text-rose-500'}`}>
+                        {globalStats.onlineCount}
+                      </span>
+                      <span className="text-lg text-gray-400 dark:text-gray-500 font-normal">/ {globalStats.totalCount}</span>
+                    </div>
+                    <CircularProgress
+                      value={globalStats.totalCount > 0 ? globalStats.onlineCount / globalStats.totalCount : 0}
+                      colorClass={globalStats.onlineCount === globalStats.totalCount && globalStats.totalCount > 0 ? 'text-emerald-500' : 'text-rose-500'}
+                      size={36}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between mt-1 text-[10px] text-muted-foreground/60 leading-none">
+                    <span>Online</span>
+                    <span>解锁地区: {globalStats.regionCount} 个</span>
+                  </div>
 
-        {empty && !hasErrors && (
-          <div className="py-24 flex flex-col items-center gap-3 text-muted-foreground">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            <span className="text-sm">连接后端中…</span>
-          </div>
-        )}
+                  {regions.list.length > 0 && (
+                    <div className="mt-4 pt-4 border-t border-[#f0f0f0] dark:border-border/20">
+                      <button
+                        type="button"
+                        onClick={() => setRegionsExpanded(e => !e)}
+                        className="flex items-center justify-between w-full text-[11px] text-muted-foreground font-medium hover:text-foreground transition-colors group"
+                      >
+                        <span>地区筛选</span>
+                        <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-foreground transition-transform duration-200", regionsExpanded ? "rotate-0" : "-rotate-90")} />
+                      </button>
 
-        {empty && hasErrors && (
-          <div className="py-20 text-center text-muted-foreground">暂无节点</div>
-        )}
+                      <div className={cn(
+                        "grid transition-[grid-template-rows,opacity,margin] duration-200 ease-in-out",
+                        regionsExpanded ? "grid-rows-[1fr] opacity-100 mt-3" : "grid-rows-[0fr] opacity-0 pointer-events-none mt-0"
+                      )}>
+                        <div className="overflow-hidden">
+                          <RegionFilter
+                            regions={regions.list}
+                            total={regions.total}
+                            active={activeRegion}
+                            onChange={setActiveRegion}
+                            layout="vertical"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
 
-        {!empty && view === 'cards' && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {list.map(n => (
-              <NodeCard key={n.uuid} node={n} latencyTracks={latencyTracks.get(n.uuid)} />
-            ))}
-          </div>
-        )}
-        {!empty && view === 'table' && <NodeTable nodes={list} onOpen={setSelected} />}
-        {!empty && view === 'map' && (
-          <Suspense
-            fallback={
-              <div className="py-24 flex items-center justify-center text-sm text-muted-foreground">
-                <Loader2 className="h-5 w-5 animate-spin mr-2" /> 加载地图中…
+                <GlobalStats
+                  onlineCount={globalStats.onlineCount}
+                  totalCount={globalStats.totalCount}
+                  totalNetIn={globalStats.totalNetIn}
+                  totalNetOut={globalStats.totalNetOut}
+                  totalTrafficIn={globalStats.totalTrafficIn}
+                  totalTrafficOut={globalStats.totalTrafficOut}
+                  regionCount={globalStats.regionCount}
+                  bandwidthHistory={[...bandwidthHistoryRef.current]}
+                  trafficHistory={[...trafficHistoryRef.current]}
+                  netInHistory={[...netInHistoryRef.current]}
+                  layout="vertical"
+                  excludeOverview
+                  excludeRegionCount
+                />
+
+                {allTags.length > 0 && (
+                  <div className="rounded-xl border border-[#f0f0f0] dark:border-border/20 shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4 bg-card text-card-foreground">
+                    <h3 className="text-[11px] text-muted-foreground mb-2 font-medium">标签筛选</h3>
+                    <TagFilter tags={allTags} active={activeTag} onChange={setActiveTag} />
+                  </div>
+                )}
               </div>
-            }
-          >
-            <WorldMap nodes={list} onOpen={setSelected} />
-          </Suspense>
-        )}
+            </aside>
+          )}
 
-        {hasErrors && (
-          <Alert variant="warning">
-            <AlertTriangle className="h-4 w-4" />
-            <AlertTitle>{errors.length} 个后端错误</AlertTitle>
-            <AlertDescription>
-              <ul className="list-disc pl-5 space-y-1 mt-2">
-                {errors.map((e, i) => (
-                  <li key={i}>
-                    <b>{e.source}</b>：
-                    {e.error instanceof Error ? e.error.message : String(e.error)}
-                  </li>
-                ))}
-              </ul>
-            </AlertDescription>
-          </Alert>
-        )}
+          {/* 右侧主内容区 */}
+          <div className="flex-1 min-w-0">
+            {!selectedNode ? (
+              <div className="space-y-6 animate-in fade-in duration-200">
+                {/* 小屏幕下显示原始堆叠布局 */}
+                {!empty && (
+                  <div className="lg:hidden">
+                    <GlobalStats
+                      onlineCount={globalStats.onlineCount}
+                      totalCount={globalStats.totalCount}
+                      totalNetIn={globalStats.totalNetIn}
+                      totalNetOut={globalStats.totalNetOut}
+                      totalTrafficIn={globalStats.totalTrafficIn}
+                      totalTrafficOut={globalStats.totalTrafficOut}
+                      regionCount={globalStats.regionCount}
+                      bandwidthHistory={[...bandwidthHistoryRef.current]}
+                      trafficHistory={[...trafficHistoryRef.current]}
+                      netInHistory={[...netInHistoryRef.current]}
+                    />
+                  </div>
+                )}
+                {!empty && (
+                  <div className="lg:hidden">
+                    <RegionFilter
+                      regions={regions.list}
+                      total={regions.total}
+                      active={activeRegion}
+                      onChange={setActiveRegion}
+                    />
+                  </div>
+                )}
+                {!empty && <div className="lg:hidden"><TagFilter tags={allTags} active={activeTag} onChange={setActiveTag} /></div>}
+
+                {empty && !hasErrors && (
+                  <div className="py-24 flex flex-col items-center gap-3 text-muted-foreground">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    <span className="text-sm">连接后端中…</span>
+                  </div>
+                )}
+
+                {empty && hasErrors && (
+                  <div className="py-20 text-center text-muted-foreground">暂无节点</div>
+                )}
+
+                {!empty && view === 'cards' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {list.map(n => (
+                      <NodeCard key={n.uuid} node={n} latencyTracks={latencyTracks.get(n.uuid)} />
+                    ))}
+                  </div>
+                )}
+                {!empty && view === 'table' && <NodeTable nodes={list} onOpen={setSelected} />}
+                {!empty && view === 'map' && (
+                  <Suspense
+                    fallback={
+                      <div className="py-24 flex items-center justify-center text-sm text-muted-foreground">
+                        <Loader2 className="h-5 w-5 animate-spin mr-2" /> 加载地图中…
+                      </div>
+                    }
+                  >
+                    <WorldMap nodes={list} onOpen={setSelected} />
+                  </Suspense>
+                )}
+
+                {hasErrors && (
+                  <Alert variant="warning">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertTitle>{errors.length} 个后端错误</AlertTitle>
+                    <AlertDescription>
+                      <ul className="list-disc pl-5 space-y-1 mt-2">
+                        {errors.map((e, i) => (
+                          <li key={i}>
+                            <b>{e.source}</b>：
+                            {e.error instanceof Error ? e.error.message : String(e.error)}
+                          </li>
+                        ))}
+                      </ul>
+                    </AlertDescription>
+                  </Alert>
+                )}
+              </div>
+            ) : (
+              <NodeDetail
+                node={selectedNode}
+                onClose={() => {
+                  setSelected(null)
+                  window.scrollTo({ top: 0, behavior: 'instant' })
+                }}
+                showSource={(config.site_tokens?.length ?? 0) > 1}
+                pool={pool}
+              />
+            )}
+          </div>
+        </div>
       </main>
 
       <Footer text={config.user_preferences.footer} repo={config.repository} dist_page={config.dist_page}/>
-
-      <NodeDetail
-        node={selectedNode}
-        onClose={() => setSelected(null)}
-        showSource={(config.site_tokens?.length ?? 0) > 1}
-        pool={pool}
-      />
     </div>
   )
 }

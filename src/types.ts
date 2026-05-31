@@ -170,6 +170,7 @@ export type Sort =
   | 'netIn'
   | 'netOut'
   | 'uptime'
+  | 'traffic'
 
 export type LatencyType = 'ping' | 'tcp_ping'
 

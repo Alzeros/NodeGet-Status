@@ -21,7 +21,7 @@ export function Footer({ text, repo, dist_page }: { text?: string, repo?: string
 
   return (
     <footer className="border-t">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-end gap-3 text-xs text-muted-foreground">
+      <div className="max-w-[1600px] mx-auto px-6 sm:px-8 lg:px-12 xl:px-16 py-4 flex items-center justify-end gap-3 text-xs text-muted-foreground">
         <a href={repo} target="_blank" rel="noreferrer" className="hover:text-primary transition-colors mr-auto">
           {text || 'Powered by NodeGet'}
         </a>

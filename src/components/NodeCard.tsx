@@ -67,6 +67,11 @@ export function NodeCard({ node, latencyTracks }: NodeCardProps) {
       id: 'disk',
       label: '磁盘',
       value: u.disk,
+      spacerNode: (
+        <span>
+          Swap: {bytes(node.dynamic?.used_swap)} / {bytes(node.dynamic?.total_swap)}
+        </span>
+      ),
       detail: u.diskTotal ? `${bytes(u.diskUsed)} / ${bytes(u.diskTotal)}` : null,
     },
     {
@@ -74,9 +79,9 @@ export function NodeCard({ node, latencyTracks }: NodeCardProps) {
       label: '本月流量',
       valueNode: (
         <span title={trafficDetail}>
-          <span className="text-emerald-500">↑ {bytes(trafficOut)}</span>
+          <span className="text-emerald-500 font-sans">↑ {bytes(trafficOut)}</span>
           <span className="text-muted-foreground mx-1">|</span>
-          <span className="text-blue-500">↓ {bytes(trafficIn)}</span>
+          <span className="text-blue-500 font-sans">↓ {bytes(trafficIn)}</span>
         </span>
       ),
       percent: trafficPercent,
@@ -115,25 +120,30 @@ export function NodeCard({ node, latencyTracks }: NodeCardProps) {
         )}
 
         {/* Resource Metrics */}
-        <div className="flex flex-col gap-2.5">
-          {resourceMetrics.map(m => (
-            <ResourceRow
-              key={m.id}
-              label={m.label}
-              valueNode={m.valueNode ?? <span className="tabular-nums">{pct(m.value)}</span>}
-              percent={m.percent ?? m.value}
-              barClassName={m.barClassName ?? loadColor(m.value)}
-              barHeight={m.barHeight}
-              detail={m.detail}
-              detailTitle={m.detailTitle}
-              align={m.align}
-            />
-          ))}
+        <div className="flex flex-col gap-3.5">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+            {resourceMetrics.map(m => (
+              <ResourceRow
+                key={m.id}
+                label={m.label}
+                valueNode={m.valueNode ?? <span className="tabular-nums">{pct(m.value)}</span>}
+                percent={m.percent ?? m.value}
+                barClassName={m.barClassName ?? loadColor(m.value)}
+                barHeight={m.barHeight}
+                detail={m.detail}
+                detailTitle={m.detailTitle}
+                align={m.align}
+                stacked={m.id === 'traffic'}
+                hasSpacer={m.id === 'disk'}
+                spacerNode={m.spacerNode}
+              />
+            ))}
+          </div>
           {/* 网络质量区域 — 始终渲染以保持卡片底部对齐 */}
           <div className="flex flex-col gap-[4px]">
             <span className="text-xs text-muted-foreground">网络质量 (30min)</span>
             {hasNetworkQuality ? (
-              <div className="flex flex-col gap-[4px] w-full">
+              <div className="flex flex-col gap-[2px] w-full">
                 {(['cm', 'cu', 'ct'] as IspKey[]).map(ispKey => {
                   const track = latencyTracks?.[ispKey]
                   const emptyBlocks = Array.from({ length: 10 }, () => null)
@@ -149,7 +159,7 @@ export function NodeCard({ node, latencyTracks }: NodeCardProps) {
                         {(track?.blocks ?? emptyBlocks).map((b, i) => (
                           <div
                             key={i}
-                            className="group relative z-0 h-[24px] flex items-center justify-center cursor-pointer hover:z-10"
+                            className="group relative z-0 h-[12px] flex items-center justify-center cursor-pointer hover:z-10"
                             title={
                               b
                                 ? `${track!.label} | ${new Date(b.t).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} - ${new Date(b.t + 180000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
@@ -171,7 +181,7 @@ export function NodeCard({ node, latencyTracks }: NodeCardProps) {
                 })}
               </div>
             ) : (
-              <div className="h-[80px] flex items-center justify-center gap-1.5 text-muted-foreground/40">
+              <div className="h-[40px] flex items-center justify-center gap-1.5 text-muted-foreground/40">
                 <Info className="h-3.5 w-3.5" />
                 <span className="text-xs">此服务器未开启ICMP ping监控</span>
               </div>
@@ -182,8 +192,8 @@ export function NodeCard({ node, latencyTracks }: NodeCardProps) {
         {/* Footer Stats */}
         <div className="pt-2.5 border-t border-dashed font-mono text-xs text-muted-foreground space-y-1.5">
           <div className="flex items-center gap-3">
-            <Stat icon={ArrowDown}>{bytes(u.netIn || 0)}/s</Stat>
-            <Stat icon={ArrowUp}>{bytes(u.netOut || 0)}/s</Stat>
+            <Stat icon={ArrowDown} className="text-blue-500">{bytes(u.netIn || 0)}/s</Stat>
+            <Stat icon={ArrowUp} className="text-emerald-500">{bytes(u.netOut || 0)}/s</Stat>
           </div>
           <div className="flex items-center gap-3">
             <Stat icon={Clock}>{uptime(u.uptime)}</Stat>
@@ -206,11 +216,12 @@ export function NodeCard({ node, latencyTracks }: NodeCardProps) {
   )
 }
 
+
 // --- Sub Components ---
 
-function Stat({ icon: Icon, children }: { icon: LucideIcon; children: ReactNode }) {
+function Stat({ icon: Icon, children, className }: { icon: LucideIcon; children: ReactNode; className?: string }) {
   return (
-    <span className="inline-flex items-center gap-1">
+    <span className={cn("inline-flex items-center gap-1", className)}>
       <Icon className="h-3 w-3" />
       {children}
     </span>
@@ -225,9 +236,10 @@ interface ResourceMetricItem {
   percent?: number
   barClassName?: string
   barHeight?: string
-  detail?: string | null
+  detail?: ReactNode | null
   detailTitle?: string
   align?: 'baseline' | 'start' | 'center'
+  spacerNode?: ReactNode
 }
 
 function ResourceRow({
@@ -239,26 +251,53 @@ function ResourceRow({
   detailTitle,
   barHeight = 'h-1.5',
   align = 'baseline',
+  stacked = false,
+  hasSpacer = false,
+  spacerNode,
 }: {
   label: string
   valueNode?: ReactNode
   percent?: number
   barClassName?: string
-  detail?: string | null
+  detail?: ReactNode | null
   detailTitle?: string
   barHeight?: string
   align?: 'baseline' | 'start' | 'center'
+  stacked?: boolean
+  hasSpacer?: boolean
+  spacerNode?: ReactNode
 }) {
   const alignClass =
     align === 'start' ? 'items-start' : align === 'center' ? 'items-center' : 'items-baseline'
   return (
     <div className="min-w-0">
-      <div className={cn('flex justify-between text-xs gap-2', alignClass)}>
-        <span className="text-muted-foreground shrink-0 whitespace-nowrap">{label}</span>
-        <span className="text-right whitespace-nowrap overflow-hidden text-ellipsis">
-          {valueNode}
-        </span>
-      </div>
+      {stacked ? (
+        <div className="flex flex-col gap-0.5 text-xs w-full">
+          <span className="text-muted-foreground shrink-0 whitespace-nowrap">{label}</span>
+          <span className="text-left whitespace-nowrap overflow-hidden text-ellipsis">
+            {valueNode}
+          </span>
+        </div>
+      ) : (
+        <div>
+          <div className={cn('flex justify-between text-xs gap-2', alignClass)}>
+            <span className="text-muted-foreground shrink-0 whitespace-nowrap">{label}</span>
+            <span className="text-right whitespace-nowrap overflow-hidden text-ellipsis">
+              {valueNode}
+            </span>
+          </div>
+          {hasSpacer && (
+            <div
+              className={cn(
+                'font-mono text-[11px] mt-0.5 text-muted-foreground/75 truncate',
+                !spacerNode && 'select-none opacity-0',
+              )}
+            >
+              {spacerNode || <>&nbsp;</>}
+            </div>
+          )}
+        </div>
+      )}
       {percent != null && (
         <Progress
           value={percent}

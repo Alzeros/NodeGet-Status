@@ -1,8 +1,9 @@
 import { cn } from '../utils/cn'
 
 export function Flag({ code, className }: { code?: string | null; className?: string }) {
-  const c = code?.trim().toUpperCase() || ''
+  let c = code?.trim().toUpperCase() || ''
   if (!/^[A-Z]{2}$/.test(c)) return null
+  if (c === 'TW') c = 'CN'
   return (
     <img
       src={`https://flagcdn.com/${c.toLowerCase()}.svg`}

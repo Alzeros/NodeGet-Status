@@ -13,6 +13,7 @@ const OPTIONS: { value: Sort; label: string }[] = [
   { value: 'netIn', label: '下行速度' },
   { value: 'netOut', label: '上行速度' },
   { value: 'uptime', label: '在线时长' },
+  { value: 'traffic', label: '本月流量' },
 ]
 
 export function SortMenu({ value, onChange }: { value: Sort; onChange: (v: Sort) => void }) {
