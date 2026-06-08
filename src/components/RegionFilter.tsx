@@ -16,22 +16,22 @@ export function RegionFilter({ regions, total, active, onChange, layout = 'horiz
   return (
     <div className={cn(
       "flex flex-wrap items-center gap-2",
-      layout === 'vertical' && "grid grid-cols-2 gap-1.5 w-full"
+      layout === 'vertical' && "grid grid-cols-3 gap-1.5 w-full"
     )}>
       <Chip
         selected={active === null}
         onClick={() => onChange(null)}
         layout={layout}
-        className={layout === 'vertical' ? 'col-span-2' : ''}
+        className={layout === 'vertical' ? 'col-span-3' : ''}
       >
         <span>全部</span>
-        <span className="text-[10px] opacity-70 ml-auto">{total}</span>
+        <span className="text-[10px] font-bold opacity-70 ml-auto">{total}</span>
       </Chip>
       {regions.map(r => (
         <Chip key={r.code} selected={active === r.code} onClick={() => onChange(r.code)} layout={layout}>
           <Flag code={r.code} className="w-4 h-3 shrink-0" />
           <span>{r.code}</span>
-          <span className="text-[10px] opacity-70 ml-auto">{r.count}</span>
+          <span className="text-[10px] font-bold opacity-70 ml-auto">{r.count}</span>
         </Chip>
       ))}
     </div>

@@ -3,9 +3,10 @@ interface Props {
   width?: number
   height?: number
   color?: string
+  className?: string
 }
 
-export function Sparkline({ data, width = 64, height = 28, color = 'currentColor' }: Props) {
+export function Sparkline({ data, width = 64, height = 28, color = 'currentColor', className }: Props) {
   if (data.length < 2) return null
 
   const max = Math.max(...data, 1)
@@ -26,7 +27,7 @@ export function Sparkline({ data, width = 64, height = 28, color = 'currentColor
       width={width}
       height={height}
       viewBox={`0 0 ${width} ${height}`}
-      className="shrink-0 opacity-60"
+      className={`shrink-0 opacity-60 ${className || ''}`}
       preserveAspectRatio="none"
     >
       <defs>

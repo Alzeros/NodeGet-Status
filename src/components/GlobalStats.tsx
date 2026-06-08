@@ -119,7 +119,7 @@ export function GlobalStats({
             <ArrowLeftRight className="shrink-0 h-4 w-4 text-blue-500" strokeWidth={1.5} />
             <span className="text-[11px] text-muted-foreground">实时带宽</span>
           </div>
-          <div className="flex items-center gap-3 mb-2.5">
+          <div className="flex items-center justify-between mb-2.5">
             <div className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
               <ArrowUp className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} />
               <span className="text-lg font-bold">{netOutParts.num}</span>
@@ -133,8 +133,8 @@ export function GlobalStats({
             </div>
           </div>
           {netInHistory.length > 1 && (
-            <div className="mt-2">
-              <Sparkline data={netInHistory} width={200} height={32} color="hsl(var(--primary))" />
+            <div className="mt-2 w-full">
+              <Sparkline data={netInHistory} width={200} height={32} color="hsl(var(--primary))" className="w-full" />
             </div>
           )}
         </div>
