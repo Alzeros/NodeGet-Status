@@ -8,13 +8,15 @@ import { bytes, pct, relativeAge } from '../utils/format'
 import { deriveUsage, displayName, distroLogo, virtLabel } from '../utils/derive'
 import { cn, loadColor } from '../utils/cn'
 import type { Node } from '../types'
+import type { NodeStatusCategory } from '../utils/stableStatus'
 
 interface Props {
   nodes: Node[]
   onOpen?: (uuid: string) => void
+  statuses?: Map<string, NodeStatusCategory>
 }
 
-export function NodeTable({ nodes, onOpen }: Props) {
+export function NodeTable({ nodes, onOpen, statuses }: Props) {
   return (
     <Card className="overflow-hidden">
       <Table>
@@ -46,7 +48,7 @@ export function NodeTable({ nodes, onOpen }: Props) {
                 className={cn('cursor-pointer', !n.online && 'opacity-60')}
               >
                 <TableCell>
-                  <StatusDot online={n.online} />
+                  <StatusDot online={n.online} status={statuses?.get(n.uuid)} />
                 </TableCell>
                 <TableCell className="font-medium">
                   <div className="flex items-center gap-2 min-w-0">

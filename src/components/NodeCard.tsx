@@ -10,13 +10,15 @@ import { cn, loadColor } from '../utils/cn'
 import type { LatencyTracks, IspKey } from '../utils/latency'
 import type { Node } from '../types'
 import type { ReactNode } from 'react'
+import type { NodeStatusCategory } from '../utils/stableStatus'
 
 export interface NodeCardProps {
   node: Node
   latencyTracks?: LatencyTracks
+  status?: NodeStatusCategory
 }
 
-export function NodeCard({ node, latencyTracks }: NodeCardProps) {
+export function NodeCard({ node, latencyTracks, status }: NodeCardProps) {
   // --- 动态变量占位符 ---
   const hostname = displayName(node)
   const osInfo = osLabel(node)
@@ -102,7 +104,7 @@ export function NodeCard({ node, latencyTracks }: NodeCardProps) {
       >
         {/* Header */}
         <div className="flex items-center gap-2">
-          <StatusDot online={isOnline} />
+          <StatusDot online={isOnline} status={status} />
           {logoUrl && (
             <img src={logoUrl} alt="" className="w-5 h-5 shrink-0 object-contain" loading="lazy" />
           )}

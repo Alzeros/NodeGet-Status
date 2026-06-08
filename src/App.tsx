@@ -17,8 +17,10 @@ import { cn, getStatusColor } from './utils/cn'
 const WorldMap = lazy(() =>
   import('./components/WorldMap').then(m => ({ default: m.WorldMap })),
 )
+import { useStableStatus } from './hooks/useStableStatus'
 import { deriveUsage, displayName } from './utils/derive'
 import type { Sort, View } from './types'
+import type { NodeStatusCategory } from './utils/stableStatus'
 
 const DEFAULT_LOGO = `${import.meta.env.BASE_URL}logo.png`
 const VIEW_KEY = 'nodeget.view'
@@ -42,7 +44,8 @@ const num = (v?: number) => (Number.isFinite(v) ? (v as number) : -Infinity)
 
 export function App() {
   const { config, error: configError } = useConfig()
-  const { nodes, errors, pool, latencyTracks } = useNodes(config)
+  const { nodes, errors, loading, pool, latencyTracks } = useNodes(config)
+  const { statuses: stableStatuses } = useStableStatus(nodes)
   const bandwidthHistoryRef = useRef<number[]>([])
   const trafficHistoryRef = useRef<number[]>([])
   const netInHistoryRef = useRef<number[]>([])
@@ -66,6 +69,13 @@ export function App() {
       totalTrafficOut += n.monthlyTraffic?.transmitted ?? 0
       const code = n.meta?.region?.trim().toUpperCase()
       if (code) regions.add(code)
+    }
+
+    const statusCounts = { normal: 0, warning: 0, risk: 0, offline: 0 }
+    for (const n of nodes.values()) {
+      if (n.meta?.hidden) continue
+      const cat = stableStatuses.get(n.uuid) ?? 'normal'
+      statusCounts[cat]++
     }
 
     const totalBandwidth = totalNetIn + totalNetOut
@@ -94,16 +104,19 @@ export function App() {
       totalTrafficIn,
       totalTrafficOut,
       regionCount: regions.size,
+      statusCounts,
     }
-  }, [nodes])
+  }, [nodes, stableStatuses])
 
   const [view, setView] = useState<View>(initialView)
   const [sort, setSort] = useState<Sort>(initialSort)
   const [query, setQuery] = useState('')
   const [activeTag, setActiveTag] = useState<string | null>(null)
   const [activeRegion, setActiveRegion] = useState<string | null>(null)
+  const [activeStatus, setActiveStatus] = useState<NodeStatusCategory | null>(null)
   const [selected, setSelected] = useState<string | null>(readHash)
   const [regionsExpanded, setRegionsExpanded] = useState(true)
+  const [statusExpanded, setStatusExpanded] = useState(true)
 
   useEffect(() => {
     localStorage.setItem(VIEW_KEY, view)
@@ -174,6 +187,9 @@ export function App() {
     if (activeRegion) {
       arr = arr.filter(n => n.meta?.region?.trim().toUpperCase() === activeRegion)
     }
+    if (activeStatus) {
+      arr = arr.filter(n => (stableStatuses.get(n.uuid) ?? 'normal') === activeStatus)
+    }
 
     const q = query.trim().toLowerCase()
     if (q) {
@@ -219,9 +235,40 @@ export function App() {
 
       return cmp || displayName(a).localeCompare(displayName(b))
     })
-  }, [nodes, query, activeTag, activeRegion, sort, regions])
+  }, [nodes, query, activeTag, activeRegion, activeStatus, sort, regions, stableStatuses])
+
+  const filteredStatusCounts = useMemo(() => {
+    let arr = [...nodes.values()].filter(n => !n.meta?.hidden)
+    if (activeTag) arr = arr.filter(n => n.meta?.tags?.includes(activeTag))
+    if (activeRegion) {
+      arr = arr.filter(n => n.meta?.region?.trim().toUpperCase() === activeRegion)
+    }
+    const q = query.trim().toLowerCase()
+    if (q) {
+      arr = arr.filter(n => {
+        const hay = [
+          n.uuid, n.source, n.meta?.name, n.meta?.region,
+          n.meta?.virtualization, n.static?.system?.system_host_name,
+          n.static?.system?.system_name, ...(n.meta?.tags ?? []),
+        ].filter(Boolean).join(' ').toLowerCase()
+        return hay.includes(q)
+      })
+    }
+    const counts = { normal: 0, warning: 0, risk: 0, offline: 0 }
+    for (const n of arr) {
+      const cat = stableStatuses.get(n.uuid) ?? 'normal'
+      counts[cat]++
+    }
+    return counts
+  }, [nodes, activeTag, activeRegion, query, stableStatuses])
 
   const selectedNode = selected ? nodes.get(selected) || null : null
+  const clearFilters = () => {
+    setQuery('')
+    setActiveTag(null)
+    setActiveRegion(null)
+    setActiveStatus(null)
+  }
 
   if (configError) {
     return (
@@ -244,8 +291,12 @@ export function App() {
   }
 
   const logo = config.user_preferences.site_logo || DEFAULT_LOGO
-  const empty = list.length === 0
   const hasErrors = errors.length > 0
+  const hasNodes = globalStats.totalCount > 0
+  const hasResults = list.length > 0
+  const noResults = hasNodes && !hasResults
+  const showInitialLoading = !hasNodes && loading && !hasErrors
+  const showNoNodes = !hasNodes && (!loading || hasErrors)
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -264,7 +315,7 @@ export function App() {
       <main className="flex-1 w-full max-w-[1600px] mx-auto px-6 sm:px-8 lg:px-12 xl:px-16 py-6 sm:py-8">
         <div className="flex gap-6">
           {/* 左侧固定侧边栏 - 仅 lg 以上显示 */}
-          {!empty && (
+          {hasNodes && (
             <aside className="hidden lg:block w-[260px] shrink-0">
               <div className="sticky top-[60px] space-y-3 max-h-[calc(100vh-80px)] overflow-y-auto sidebar-scroll pb-4">
                 {/* 节点状态与地区筛选合并卡片 */}
@@ -323,6 +374,49 @@ export function App() {
                       </div>
                     </div>
                   )}
+
+                  <div className="mt-4 pt-4 border-t border-[#f0f0f0] dark:border-border/20">
+                    <button
+                      type="button"
+                      onClick={() => setStatusExpanded(e => !e)}
+                      className="flex items-center justify-between w-full text-[11px] text-muted-foreground font-medium hover:text-foreground transition-colors group"
+                    >
+                      <span>状态筛选</span>
+                      <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-foreground transition-transform duration-200", statusExpanded ? "rotate-0" : "-rotate-90")} />
+                    </button>
+
+                    <div className={cn(
+                      "grid transition-[grid-template-rows,opacity,margin] duration-200 ease-in-out",
+                      statusExpanded ? "grid-rows-[1fr] opacity-100 mt-3" : "grid-rows-[0fr] opacity-0 pointer-events-none mt-0"
+                    )}>
+                      <div className="overflow-hidden">
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {([
+                            { key: 'normal' as const, label: '正常', dot: 'bg-emerald-500' },
+                            { key: 'warning' as const, label: '注意', dot: 'bg-amber-500' },
+                            { key: 'risk' as const, label: '风险', dot: 'bg-rose-500' },
+                            { key: 'offline' as const, label: '离线', dot: 'bg-gray-400' },
+                          ]).map(({ key, label, dot }) => (
+                            <button
+                              key={key}
+                              type="button"
+                              onClick={() => setActiveStatus(activeStatus === key ? null : key)}
+                              className={cn(
+                                'flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border transition-colors w-full',
+                                activeStatus === key
+                                  ? 'bg-primary text-primary-foreground border-primary'
+                                  : 'bg-card text-foreground/80 border-border hover:bg-accent'
+                              )}
+                            >
+                              <span className={cn("w-2 h-2 rounded-full shrink-0", activeStatus === key ? 'bg-white/80' : dot)} />
+                              <span>{label}</span>
+                              <span className="text-[10px] font-bold opacity-70 ml-auto">{filteredStatusCounts[key]}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 <GlobalStats
@@ -356,7 +450,7 @@ export function App() {
             {!selectedNode ? (
               <div className="flex flex-col gap-6 animate-in fade-in duration-200">
                 {/* 小屏幕下显示原始堆叠布局 */}
-                {!empty && (
+                {hasNodes && (
                   <div className="lg:hidden">
                     <GlobalStats
                       onlineCount={globalStats.onlineCount}
@@ -372,7 +466,7 @@ export function App() {
                     />
                   </div>
                 )}
-                {!empty && (
+                {hasNodes && (
                   <div className="lg:hidden">
                     <RegionFilter
                       regions={regions.list}
@@ -382,28 +476,75 @@ export function App() {
                     />
                   </div>
                 )}
-                {!empty && <div className="lg:hidden"><TagFilter tags={allTags} active={activeTag} onChange={setActiveTag} /></div>}
+                {hasNodes && <div className="lg:hidden"><TagFilter tags={allTags} active={activeTag} onChange={setActiveTag} /></div>}
+                {hasNodes && (
+                  <div className="lg:hidden">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs text-muted-foreground font-medium">状态筛选</span>
+                      {activeStatus && (
+                        <button type="button" onClick={() => setActiveStatus(null)} className="text-xs text-muted-foreground hover:text-foreground transition-colors">清除</button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {([
+                        { key: 'normal' as const, label: '正常', dot: 'bg-emerald-500' },
+                        { key: 'warning' as const, label: '注意', dot: 'bg-amber-500' },
+                        { key: 'risk' as const, label: '风险', dot: 'bg-rose-500' },
+                        { key: 'offline' as const, label: '离线', dot: 'bg-gray-400' },
+                      ]).map(({ key, label, dot }) => (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => setActiveStatus(activeStatus === key ? null : key)}
+                          className={cn(
+                            'flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border transition-colors w-full',
+                            activeStatus === key
+                              ? 'bg-primary text-primary-foreground border-primary'
+                              : 'bg-card text-foreground/80 border-border hover:bg-accent'
+                          )}
+                        >
+                          <span className={cn("w-2 h-2 rounded-full shrink-0", activeStatus === key ? 'bg-white/80' : dot)} />
+                          <span>{label}</span>
+                          <span className="text-[10px] font-bold opacity-70 ml-auto">{filteredStatusCounts[key]}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
-                {empty && !hasErrors && (
+                {showInitialLoading && (
                   <div className="py-24 flex flex-col items-center gap-3 text-muted-foreground">
                     <Loader2 className="h-8 w-8 animate-spin text-primary" />
                     <span className="text-sm">连接后端中…</span>
                   </div>
                 )}
 
-                {empty && hasErrors && (
+                {showNoNodes && (
                   <div className="py-20 text-center text-muted-foreground">暂无节点</div>
                 )}
 
-                {!empty && view === 'cards' && (
+                {noResults && (
+                  <div className="py-20 flex flex-col items-center gap-3 text-center text-muted-foreground">
+                    <div className="text-sm">暂无匹配节点</div>
+                    <button
+                      type="button"
+                      onClick={clearFilters}
+                      className="rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:bg-accent transition-colors"
+                    >
+                      清除筛选
+                    </button>
+                  </div>
+                )}
+
+                {hasResults && view === 'cards' && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {list.map(n => (
-                      <NodeCard key={n.uuid} node={n} latencyTracks={latencyTracks.get(n.uuid)} />
+                      <NodeCard key={n.uuid} node={n} latencyTracks={latencyTracks.get(n.uuid)} status={stableStatuses.get(n.uuid)} />
                     ))}
                   </div>
                 )}
-                {!empty && view === 'table' && <NodeTable nodes={list} onOpen={setSelected} />}
-                {!empty && view === 'map' && (
+                {hasResults && view === 'table' && <NodeTable nodes={list} onOpen={setSelected} statuses={stableStatuses} />}
+                {hasResults && view === 'map' && (
                   <Suspense
                     fallback={
                       <div className="py-24 flex items-center justify-center text-sm text-muted-foreground">
