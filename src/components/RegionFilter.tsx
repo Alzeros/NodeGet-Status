@@ -15,8 +15,9 @@ export function RegionFilter({ regions, total, active, onChange, layout = 'horiz
 
   return (
     <div className={cn(
-      "flex flex-wrap items-center gap-2",
-      layout === 'vertical' && "grid grid-cols-3 gap-1.5 w-full"
+      layout === 'vertical'
+        ? "grid grid-cols-3 gap-1.5 w-full"
+        : "flex flex-wrap items-center gap-2"
     )}>
       <Chip
         selected={active === null}
