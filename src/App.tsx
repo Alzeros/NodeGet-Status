@@ -473,6 +473,7 @@ export function App() {
                       total={regions.total}
                       active={activeRegion}
                       onChange={setActiveRegion}
+                      layout="vertical"
                     />
                   </div>
                 )}

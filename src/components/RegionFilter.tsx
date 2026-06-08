@@ -23,7 +23,6 @@ export function RegionFilter({ regions, total, active, onChange, layout = 'horiz
         selected={active === null}
         onClick={() => onChange(null)}
         layout={layout}
-        className={layout === 'vertical' ? 'col-span-3' : ''}
       >
         <span>全部</span>
         <span className="text-[10px] font-bold opacity-70 ml-auto">{total}</span>
