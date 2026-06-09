@@ -45,7 +45,7 @@ const num = (v?: number) => (Number.isFinite(v) ? (v as number) : -Infinity)
 export function App() {
   const { config, error: configError } = useConfig()
   const { nodes, errors, loading, pool, latencyTracks } = useNodes(config)
-  const { statuses: stableStatuses } = useStableStatus(nodes)
+  const { counters: stableCounters, statuses: stableStatuses } = useStableStatus(nodes)
   const bandwidthHistoryRef = useRef<number[]>([])
   const trafficHistoryRef = useRef<number[]>([])
   const netInHistoryRef = useRef<number[]>([])
@@ -540,11 +540,11 @@ export function App() {
                 {hasResults && view === 'cards' && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {list.map(n => (
-                      <NodeCard key={n.uuid} node={n} latencyTracks={latencyTracks.get(n.uuid)} status={stableStatuses.get(n.uuid)} />
+                      <NodeCard key={n.uuid} node={n} latencyTracks={latencyTracks.get(n.uuid)} status={stableStatuses.get(n.uuid)} counters={stableCounters.get(n.uuid)} />
                     ))}
                   </div>
                 )}
-                {hasResults && view === 'table' && <NodeTable nodes={list} onOpen={setSelected} statuses={stableStatuses} />}
+                {hasResults && view === 'table' && <NodeTable nodes={list} onOpen={setSelected} statuses={stableStatuses} counters={stableCounters} />}
                 {hasResults && view === 'map' && (
                   <Suspense
                     fallback={

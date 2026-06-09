@@ -1,4 +1,4 @@
-import type { Node } from '../types'
+import type { Node, DynamicSummary } from '../types'
 
 export type NodeStatusCategory = 'normal' | 'warning' | 'risk' | 'offline'
 
@@ -10,6 +10,23 @@ export interface AbnormalCounters {
   udp: number
   process: number
 }
+
+interface ThresholdDef {
+  key: keyof AbnormalCounters
+  label: string
+  threshold: number
+  getCurrent: (d: DynamicSummary) => number
+  format: (v: number) => string
+}
+
+const THRESHOLDS: ThresholdDef[] = [
+  { key: 'cpu', label: 'CPU', threshold: 80, getCurrent: d => d.cpu_usage ?? 0, format: v => `${Math.round(v)}%` },
+  { key: 'memory', label: '内存', threshold: 85, getCurrent: d => d.total_memory ? ((d.used_memory ?? 0) / d.total_memory) * 100 : 0, format: v => `${Math.round(v)}%` },
+  { key: 'disk', label: '磁盘', threshold: 85, getCurrent: d => d.total_space ? ((d.total_space - (d.available_space ?? d.total_space)) / d.total_space) * 100 : 0, format: v => `${Math.round(v)}%` },
+  { key: 'tcp', label: 'TCP', threshold: 1000, getCurrent: d => d.tcp_connections ?? 0, format: v => String(Math.round(v)) },
+  { key: 'udp', label: 'UDP', threshold: 1000, getCurrent: d => d.udp_connections ?? 0, format: v => String(Math.round(v)) },
+  { key: 'process', label: '进程', threshold: 250, getCurrent: d => d.process_count ?? 0, format: v => String(Math.round(v)) },
+]
 
 const STORAGE_KEY = 'nodeget.abnormalCounters'
 
@@ -39,44 +56,37 @@ function dec(v: number) {
 export function updateSingleCounter(node: Node, existing?: AbnormalCounters): AbnormalCounters {
   const c: AbnormalCounters = existing
     ? { ...existing }
-    : { cpu: 0, memory: 0, disk: 0, tcp: 0, udp: 0, process: 0 }
+    : Object.fromEntries(THRESHOLDS.map(t => [t.key, 0])) as unknown as AbnormalCounters
 
   const d = node.dynamic
 
   // 离线或没有动态数据时不继续累加，保留已有计数器
   if (!node.online || !d) return c
 
-  // CPU > 80
-  const cpuUsage = d.cpu_usage ?? 0
-  c.cpu = cpuUsage > 80 ? c.cpu + 1 : dec(c.cpu)
-
-  // 内存使用率 > 85
-  const memTotal = d.total_memory || 0
-  const memUsage = memTotal && d.used_memory != null
-    ? (d.used_memory / memTotal) * 100
-    : 0
-  c.memory = memUsage > 85 ? c.memory + 1 : dec(c.memory)
-
-  // 磁盘使用率 > 85
-  const diskTotal = d.total_space || 0
-  const diskUsage = diskTotal && d.available_space != null
-    ? ((diskTotal - d.available_space) / diskTotal) * 100
-    : 0
-  c.disk = diskUsage > 85 ? c.disk + 1 : dec(c.disk)
-
-  // TCP > 1000
-  const tcp = d.tcp_connections ?? 0
-  c.tcp = tcp > 1000 ? c.tcp + 1 : dec(c.tcp)
-
-  // UDP > 1000
-  const udp = d.udp_connections ?? 0
-  c.udp = udp > 1000 ? c.udp + 1 : dec(c.udp)
-
-  // 进程数 > 120
-  const proc = d.process_count ?? 0
-  c.process = proc > 120 ? c.process + 1 : dec(c.process)
+  for (const t of THRESHOLDS) {
+    const current = t.getCurrent(d)
+    c[t.key] = current > t.threshold ? c[t.key] + 1 : dec(c[t.key])
+  }
 
   return c
+}
+
+export interface StatusReason {
+  key: string
+  label: string
+  display: string
+}
+
+export function getStatusReasons(node: Node, counters?: AbnormalCounters): StatusReason[] {
+  if (!counters) return []
+  const d = node.dynamic
+  const reasons: StatusReason[] = []
+  for (const t of THRESHOLDS) {
+    if (counters[t.key] >= 15 && d) {
+      reasons.push({ key: t.key, label: t.label, display: `${t.label} ${t.format(t.getCurrent(d))}` })
+    }
+  }
+  return reasons
 }
 
 export function getStableStatus(

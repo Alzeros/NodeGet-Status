@@ -8,15 +8,17 @@ import { bytes, pct, relativeAge } from '../utils/format'
 import { deriveUsage, displayName, distroLogo, virtLabel } from '../utils/derive'
 import { cn, loadColor } from '../utils/cn'
 import type { Node } from '../types'
-import type { NodeStatusCategory } from '../utils/stableStatus'
+import type { NodeStatusCategory, AbnormalCounters } from '../utils/stableStatus'
+import { getStatusReasons } from '../utils/stableStatus'
 
 interface Props {
   nodes: Node[]
   onOpen?: (uuid: string) => void
   statuses?: Map<string, NodeStatusCategory>
+  counters?: Map<string, AbnormalCounters>
 }
 
-export function NodeTable({ nodes, onOpen, statuses }: Props) {
+export function NodeTable({ nodes, onOpen, statuses, counters }: Props) {
   return (
     <Card className="overflow-hidden">
       <Table>
@@ -61,6 +63,18 @@ export function NodeTable({ nodes, onOpen, statuses }: Props) {
                       />
                     )}
                     <span className="truncate">{displayName(n)}</span>
+                    {(() => {
+                      const st = statuses?.get(n.uuid)
+                      if (st !== 'warning' && st !== 'risk') return null
+                      const reasons = getStatusReasons(n, counters?.get(n.uuid))
+                      if (reasons.length === 0) return null
+                      const color = st === 'risk' ? 'text-rose-500' : 'text-amber-500'
+                      return (
+                        <span className={cn('text-[10px] font-medium shrink-0', color)}>
+                          {reasons.map(r => r.display).join('·')}
+                        </span>
+                      )
+                    })()}
                   </div>
                 </TableCell>
                 <TableCell className="text-center">

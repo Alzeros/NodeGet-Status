@@ -10,15 +10,17 @@ import { cn, loadColor } from '../utils/cn'
 import type { LatencyTracks, IspKey } from '../utils/latency'
 import type { Node } from '../types'
 import type { ReactNode } from 'react'
-import type { NodeStatusCategory } from '../utils/stableStatus'
+import type { NodeStatusCategory, AbnormalCounters } from '../utils/stableStatus'
+import { getStatusReasons } from '../utils/stableStatus'
 
 export interface NodeCardProps {
   node: Node
   latencyTracks?: LatencyTracks
   status?: NodeStatusCategory
+  counters?: AbnormalCounters
 }
 
-export function NodeCard({ node, latencyTracks, status }: NodeCardProps) {
+export function NodeCard({ node, latencyTracks, status, counters }: NodeCardProps) {
   // --- 动态变量占位符 ---
   const hostname = displayName(node)
   const osInfo = osLabel(node)
@@ -113,6 +115,21 @@ export function NodeCard({ node, latencyTracks, status }: NodeCardProps) {
           </span>
           <Flag code={flagCode} className="shrink-0" />
         </div>
+
+        {(status === 'warning' || status === 'risk') && (() => {
+          const reasons = getStatusReasons(node, counters)
+          if (reasons.length === 0) return null
+          const color = status === 'risk' ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/25' : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/25'
+          return (
+            <div className="flex flex-wrap gap-1">
+              {reasons.map(r => (
+                <Badge key={r.key} variant="outline" className={cn('text-[10px] font-medium px-1.5 py-0', color)}>
+                  {r.display}
+                </Badge>
+              ))}
+            </div>
+          )
+        })()}
 
         {/* System Info */}
         {systemInfo && (
