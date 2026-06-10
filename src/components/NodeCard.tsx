@@ -40,6 +40,11 @@ export function NodeCard({ node, latencyTracks, status, counters }: NodeCardProp
   // --- 网络质量行 ---
   const hasNetworkQuality = latencyTracks && (latencyTracks.cm || latencyTracks.cu || latencyTracks.ct)
 
+  // --- 异常原因标签 ---
+  const reasonBadges = (status === 'warning' || status === 'risk')
+    ? getStatusReasons(node, counters)
+    : []
+
   // --- 指标模板配置 (动态渲染) ---
   const monthlyTraffic = node.monthlyTraffic
   const trafficIn = monthlyTraffic?.received ?? 0
@@ -105,7 +110,7 @@ export function NodeCard({ node, latencyTracks, status, counters }: NodeCardProp
         )}
       >
         {/* Header */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <StatusDot online={isOnline} status={status} />
           {logoUrl && (
             <img src={logoUrl} alt="" className="w-5 h-5 shrink-0 object-contain" loading="lazy" />
@@ -113,23 +118,22 @@ export function NodeCard({ node, latencyTracks, status, counters }: NodeCardProp
           <span className="font-semibold flex-1 min-w-0 truncate" title={hostname}>
             {hostname}
           </span>
+          {reasonBadges.length > 0 && (
+            <div className="flex flex-wrap gap-1 shrink-0">
+              {reasonBadges.map(r => {
+                const color = status === 'risk'
+                  ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/25'
+                  : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/25'
+                return (
+                  <Badge key={r.key} variant="outline" className={cn('text-[10px] font-medium px-1.5 py-0', color)}>
+                    {r.display}
+                  </Badge>
+                )
+              })}
+            </div>
+          )}
           <Flag code={flagCode} className="shrink-0" />
         </div>
-
-        {(status === 'warning' || status === 'risk') && (() => {
-          const reasons = getStatusReasons(node, counters)
-          if (reasons.length === 0) return null
-          const color = status === 'risk' ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/25' : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/25'
-          return (
-            <div className="flex flex-wrap gap-1">
-              {reasons.map(r => (
-                <Badge key={r.key} variant="outline" className={cn('text-[10px] font-medium px-1.5 py-0', color)}>
-                  {r.display}
-                </Badge>
-              ))}
-            </div>
-          )
-        })()}
 
         {/* System Info */}
         {systemInfo && (
