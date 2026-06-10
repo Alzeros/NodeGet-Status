@@ -8,6 +8,7 @@ import { bytes, pct, relativeAge } from '../utils/format'
 import { deriveUsage, displayName, distroLogo, virtLabel } from '../utils/derive'
 import { cn, loadColor } from '../utils/cn'
 import type { Node } from '../types'
+import { memo } from 'react'
 import type { NodeStatusCategory, AbnormalCounters } from '../utils/stableStatus'
 import { getStatusReasons } from '../utils/stableStatus'
 
@@ -18,7 +19,19 @@ interface Props {
   counters?: Map<string, AbnormalCounters>
 }
 
-export function NodeTable({ nodes, onOpen, statuses, counters }: Props) {
+function nodeTableEqual(prev: Props, next: Props) {
+  if (prev.onOpen !== next.onOpen) return false
+  if (prev.statuses !== next.statuses) return false
+  if (prev.counters !== next.counters) return false
+  if (prev.nodes.length !== next.nodes.length) return false
+  for (let i = 0; i < prev.nodes.length; i++) {
+    const pn = prev.nodes[i], nn = next.nodes[i]
+    if (pn.uuid !== nn.uuid || pn.online !== nn.online || pn.dynamic !== nn.dynamic || pn.monthlyTraffic !== nn.monthlyTraffic || pn.meta !== nn.meta) return false
+  }
+  return true
+}
+
+export const NodeTable = memo<Props>(function NodeTable({ nodes, onOpen, statuses, counters }: Props) {
   return (
     <Card className="overflow-hidden">
       <Table>
@@ -133,7 +146,7 @@ export function NodeTable({ nodes, onOpen, statuses, counters }: Props) {
       </Table>
     </Card>
   )
-}
+})
 
 function CellBar({
   value,

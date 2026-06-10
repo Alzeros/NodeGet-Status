@@ -300,7 +300,8 @@ export function useNodes(config: SiteConfig | null) {
       }
       setAgents(seed)
 
-      await Promise.all(
+      // 并行获取元数据/静态数据、动态数据、延迟数据
+      const metaStaticTask = Promise.all(
         pool.entries.map(async entry => {
           const uuids = sourceUuids.get(entry.name) || []
           if (!uuids.length) return
@@ -333,7 +334,6 @@ export function useNodes(config: SiteConfig | null) {
 
           setAgents(prev => {
             const next = new Map(prev)
-
             const grouped = new Map<string, Record<string, unknown>>()
             for (const row of metaRows) {
               if (!row || row.value == null) continue
@@ -345,7 +345,6 @@ export function useNodes(config: SiteConfig | null) {
               const cur = next.get(uuid) ?? blankAgent(uuid, entry.name)
               next.set(uuid, { ...cur, meta: parseMeta(grouped.get(uuid) ?? {}) })
             }
-
             if (stat.status === 'fulfilled' && stat.value) {
               for (const row of stat.value) {
                 if (!row.uuid) continue
@@ -358,8 +357,14 @@ export function useNodes(config: SiteConfig | null) {
         }),
       )
 
-      await tickDynamic()
-      setLoading(false)
+      // 动态数据首次加载——它决定何时解除 loading
+      const dynamicFirstLoad = tickDynamic().then(() => setLoading(false))
+
+      // 延迟数据首次加载——不阻塞 loading，并行跑
+      tickLatency().catch(() => {})
+      latTimer = setInterval(tickLatency, LATENCY_INTERVAL_MS)
+
+      await Promise.all([metaStaticTask, dynamicFirstLoad])
     }
 
     const tickDynamic = async () => {
@@ -405,7 +410,7 @@ export function useNodes(config: SiteConfig | null) {
           const uuids = sourceUuids.get(entry.name) || []
           if (!uuids.length) return
 
-          const batchSize = 10
+          const batchSize = 20
           for (let i = 0; i < uuids.length; i += batchSize) {
             const batch = uuids.slice(i, i + batchSize)
             const results = await Promise.allSettled(
@@ -438,10 +443,6 @@ export function useNodes(config: SiteConfig | null) {
     let latTimer: ReturnType<typeof setInterval> | null = null
 
     bootstrap()
-      .then(() => {
-        tickLatency().catch(() => {})
-        latTimer = setInterval(tickLatency, LATENCY_INTERVAL_MS)
-      })
       .catch((e: unknown) => {
         setErrors(prev => [...prev, { source: '*', error: e }])
         setLoading(false)

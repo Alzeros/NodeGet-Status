@@ -10,6 +10,7 @@ import { cn, loadColor } from '../utils/cn'
 import type { LatencyTracks, IspKey } from '../utils/latency'
 import type { Node } from '../types'
 import type { ReactNode } from 'react'
+import { memo } from 'react'
 import type { NodeStatusCategory, AbnormalCounters } from '../utils/stableStatus'
 import { getStatusReasons } from '../utils/stableStatus'
 
@@ -20,7 +21,19 @@ export interface NodeCardProps {
   counters?: AbnormalCounters
 }
 
-export function NodeCard({ node, latencyTracks, status, counters }: NodeCardProps) {
+function nodeCardEqual(prev: NodeCardProps, next: NodeCardProps) {
+  if (prev.status !== next.status) return false
+  if (prev.latencyTracks !== next.latencyTracks) return false
+  if (prev.counters !== next.counters) return false
+  const pn = prev.node, nn = next.node
+  return pn.uuid === nn.uuid
+    && pn.online === nn.online
+    && pn.dynamic === nn.dynamic
+    && pn.monthlyTraffic === nn.monthlyTraffic
+    && pn.meta === nn.meta
+}
+
+export const NodeCard = memo<NodeCardProps>(function NodeCard({ node, latencyTracks, status, counters }: NodeCardProps) {
   // --- 动态变量占位符 ---
   const hostname = displayName(node)
   const osInfo = osLabel(node)
@@ -237,7 +250,7 @@ export function NodeCard({ node, latencyTracks, status, counters }: NodeCardProp
       </Card>
     </a>
   )
-}
+})
 
 
 // --- Sub Components ---
