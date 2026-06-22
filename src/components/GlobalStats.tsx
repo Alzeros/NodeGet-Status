@@ -95,7 +95,7 @@ export function GlobalStats({
       <div className="flex flex-col gap-3">
         {/* 节点概览 */}
         {!excludeOverview && (
-          <div className="rounded-xl border border-[#f0f0f0] dark:border-border/20 shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4 overflow-hidden">
+          <div className="rounded-2xl p-4 overflow-hidden bg-card card-soft hover:translate-y-0">
             <div className="flex items-center gap-2 mb-2">
               <Server className="shrink-0 h-4 w-4 text-emerald-500" strokeWidth={1.5} />
               <span className="text-[11px] text-muted-foreground">节点概览</span>
@@ -114,7 +114,7 @@ export function GlobalStats({
         )}
 
         {/* 实时带宽 */}
-        <div className="rounded-xl border border-[#f0f0f0] dark:border-border/20 shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4 overflow-hidden">
+        <div className="rounded-2xl p-4 overflow-hidden bg-card card-soft hover:translate-y-0">
           <div className="flex items-center gap-2 mb-2">
             <ArrowLeftRight className="shrink-0 h-4 w-4 text-blue-500" strokeWidth={1.5} />
             <span className="text-[11px] text-muted-foreground">实时带宽</span>
@@ -140,7 +140,7 @@ export function GlobalStats({
         </div>
 
         {/* 本月流量 */}
-        <div className="rounded-xl border border-[#f0f0f0] dark:border-border/20 shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4 overflow-hidden">
+        <div className="rounded-2xl p-4 overflow-hidden bg-card card-soft hover:translate-y-0">
           <div className="flex items-center gap-2 mb-2">
             <Database className="shrink-0 h-4 w-4 text-amber-500" strokeWidth={1.5} />
             <span className="text-[11px] text-muted-foreground">本月流量</span>
@@ -167,7 +167,7 @@ export function GlobalStats({
 
         {/* 区域分布 */}
         {!excludeRegionCount && (
-          <div className="rounded-xl border border-[#f0f0f0] dark:border-border/20 shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4 overflow-hidden">
+          <div className="rounded-2xl p-4 overflow-hidden bg-card card-soft hover:translate-y-0">
             <div className="flex items-center gap-2 mb-2">
               <Globe className="shrink-0 h-4 w-4 text-violet-500" strokeWidth={1.5} />
               <span className="text-[11px] text-muted-foreground">区域分布</span>
@@ -183,9 +183,9 @@ export function GlobalStats({
   }
 
   return (
-    <div className="flex flex-col md:grid md:grid-cols-4 md:gap-3 rounded-xl border border-[#f0f0f0] dark:border-border/20 shadow-[0_1px_2px_rgba(0,0,0,0.04)] md:rounded-none md:border-none md:shadow-none overflow-hidden">
+    <div className="flex flex-col md:grid md:grid-cols-4 md:gap-3 rounded-2xl bg-card card-soft hover:translate-y-0 md:bg-transparent md:border-none md:shadow-none overflow-hidden">
       {/* 节点概览 */}
-      <div className="flex items-center gap-3 md:gap-4 px-4 md:p-5 py-3 min-h-[48px] md:min-h-0 border-b border-border/10 md:border-b-0 last:border-b-0 md:rounded-xl md:border md:border-[#f0f0f0] md:dark:border-border/20 md:shadow-[0_1px_2px_rgba(0,0,0,0.04)] overflow-hidden">
+      <div className="flex items-center gap-3 md:gap-4 px-4 md:p-5 py-3 min-h-[48px] md:min-h-0 border-b border-border/10 md:border-b-0 last:border-b-0 md:rounded-2xl md:bg-card md:card-soft hover:translate-y-0 overflow-hidden">
         <Server className="shrink-0 h-4 w-4 text-emerald-500" strokeWidth={1.5} />
         <div className="flex-1 min-w-0 flex flex-row md:flex-col justify-between md:justify-center items-center md:items-start gap-0 md:gap-1">
           <div className="text-sm md:text-[11px] text-muted-foreground md:leading-none md:h-[14px] md:flex md:items-center md:overflow-hidden">
@@ -207,7 +207,7 @@ export function GlobalStats({
       </div>
 
       {/* 实时带宽 */}
-      <div className="flex items-center gap-3 md:gap-4 px-4 md:p-5 py-3 min-h-[48px] md:min-h-0 border-b border-border/10 md:border-b-0 last:border-b-0 md:rounded-xl md:border md:border-[#f0f0f0] md:dark:border-border/20 md:shadow-[0_1px_2px_rgba(0,0,0,0.04)] overflow-hidden">
+      <div className="flex items-center gap-3 md:gap-4 px-4 md:p-5 py-3 min-h-[48px] md:min-h-0 border-b border-border/10 md:border-b-0 last:border-b-0 md:rounded-2xl md:bg-card md:card-soft hover:translate-y-0 overflow-hidden">
         <ArrowLeftRight className="shrink-0 h-4 w-4 text-blue-500" strokeWidth={1.5} />
         <div className="flex-1 min-w-0 flex flex-row md:flex-col justify-between md:justify-center items-center md:items-start gap-0 md:gap-1">
           <div className="text-sm md:text-[11px] text-muted-foreground md:leading-none md:h-[14px] md:flex md:items-center md:overflow-hidden">
@@ -244,7 +244,7 @@ export function GlobalStats({
       </div>
 
       {/* 本月流量 */}
-      <div className="flex items-center gap-3 md:gap-4 px-4 md:p-5 py-3 min-h-[48px] md:min-h-0 border-b border-border/10 md:border-b-0 last:border-b-0 md:rounded-xl md:border md:border-[#f0f0f0] md:dark:border-border/20 md:shadow-[0_1px_2px_rgba(0,0,0,0.04)] overflow-hidden">
+      <div className="flex items-center gap-3 md:gap-4 px-4 md:p-5 py-3 min-h-[48px] md:min-h-0 border-b border-border/10 md:border-b-0 last:border-b-0 md:rounded-2xl md:bg-card md:card-soft hover:translate-y-0 overflow-hidden">
         <Database className="shrink-0 h-4 w-4 text-amber-500" strokeWidth={1.5} />
         <div className="flex-1 min-w-0 flex flex-row md:flex-col justify-between md:justify-center items-center md:items-start gap-0 md:gap-1">
           <div className="text-sm md:text-[11px] text-muted-foreground md:leading-none md:h-[14px] md:flex md:items-center md:overflow-hidden">
@@ -271,7 +271,7 @@ export function GlobalStats({
       </div>
 
       {/* 区域分布 */}
-      <div className="flex items-center gap-3 md:gap-4 px-4 md:p-5 py-3 min-h-[48px] md:min-h-0 border-b border-border/10 md:border-b-0 last:border-b-0 md:rounded-xl md:border md:border-[#f0f0f0] md:dark:border-border/20 md:shadow-[0_1px_2px_rgba(0,0,0,0.04)] overflow-hidden">
+      <div className="flex items-center gap-3 md:gap-4 px-4 md:p-5 py-3 min-h-[48px] md:min-h-0 border-b border-border/10 md:border-b-0 last:border-b-0 md:rounded-2xl md:bg-card md:card-soft hover:translate-y-0 overflow-hidden">
         <Globe className="shrink-0 h-4 w-4 text-violet-500" strokeWidth={1.5} />
         <div className="flex-1 min-w-0 flex flex-row md:flex-col justify-between md:justify-center items-center md:items-start gap-0 md:gap-1">
           <div className="text-sm md:text-[11px] text-muted-foreground md:leading-none md:h-[14px] md:flex md:items-center md:overflow-hidden">

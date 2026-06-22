@@ -158,7 +158,7 @@ export interface TaskQueryCondition {
   last?: null
 }
 
-export type View = 'cards' | 'table' | 'map'
+export type View = 'cards' | 'mini' | 'table' | 'map'
 
 export type Sort =
   | 'default'

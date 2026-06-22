@@ -8,6 +8,7 @@ import { Navbar } from './components/Navbar'
 import { Footer } from './components/Footer'
 import { GlobalStats, CircularProgress } from './components/GlobalStats'
 import { NodeCard } from './components/NodeCard'
+import { MiniCard } from './components/MiniCard'
 import { NodeTable } from './components/NodeTable'
 import { NodeDetail } from './components/NodeDetail'
 import { TagFilter } from './components/TagFilter'
@@ -319,7 +320,7 @@ export function App() {
             <aside className="hidden lg:block w-[260px] shrink-0">
               <div className="sticky top-[60px] space-y-3 max-h-[calc(100vh-80px)] overflow-y-auto sidebar-scroll pb-4">
                 {/* 节点状态与地区筛选合并卡片 */}
-                <div className="rounded-xl border border-[#f0f0f0] dark:border-border/20 shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4 bg-card text-card-foreground">
+                <div className="rounded-2xl p-4 bg-card text-card-foreground card-soft hover:translate-y-0">
                   <div className="flex items-center gap-2 mb-2">
                     <Server className="shrink-0 h-4 w-4 text-emerald-500" strokeWidth={1.5} />
                     <span className="text-[11px] text-muted-foreground font-medium">节点状态</span>
@@ -402,10 +403,10 @@ export function App() {
                               type="button"
                               onClick={() => setActiveStatus(activeStatus === key ? null : key)}
                               className={cn(
-                                'flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border transition-colors w-full',
+                                'flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border border-transparent transition-all duration-200 w-full',
                                 activeStatus === key
-                                  ? 'bg-primary text-primary-foreground border-primary'
-                                  : 'bg-card text-foreground/80 border-border hover:bg-accent'
+                                  ? 'bg-primary text-primary-foreground shadow-sm'
+                                  : 'bg-secondary/40 text-foreground/80 hover:bg-secondary/80'
                               )}
                             >
                               <span className={cn("w-2 h-2 rounded-full shrink-0", activeStatus === key ? 'bg-white/80' : dot)} />
@@ -436,7 +437,7 @@ export function App() {
                 />
 
                 {allTags.length > 0 && (
-                  <div className="rounded-xl border border-[#f0f0f0] dark:border-border/20 shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4 bg-card text-card-foreground">
+                  <div className="rounded-2xl p-4 bg-card text-card-foreground card-soft hover:translate-y-0">
                     <h3 className="text-[11px] text-muted-foreground mb-2 font-medium">标签筛选</h3>
                     <TagFilter tags={allTags} active={activeTag} onChange={setActiveTag} />
                   </div>
@@ -498,10 +499,10 @@ export function App() {
                           type="button"
                           onClick={() => setActiveStatus(activeStatus === key ? null : key)}
                           className={cn(
-                            'flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border transition-colors w-full',
+                            'flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border border-transparent transition-all duration-200 w-full',
                             activeStatus === key
-                              ? 'bg-primary text-primary-foreground border-primary'
-                              : 'bg-card text-foreground/80 border-border hover:bg-accent'
+                              ? 'bg-primary text-primary-foreground shadow-sm'
+                              : 'bg-secondary/40 text-foreground/80 hover:bg-secondary/80'
                           )}
                         >
                           <span className={cn("w-2 h-2 rounded-full shrink-0", activeStatus === key ? 'bg-white/80' : dot)} />
@@ -544,8 +545,15 @@ export function App() {
                     ))}
                   </div>
                 )}
-                {hasResults && view === 'table' && <NodeTable nodes={list} onOpen={setSelected} statuses={stableStatuses} counters={stableCounters} />}
-                {hasResults && view === 'map' && (
+                {/* {hasResults && view === 'mini' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                    {list.map(n => (
+                      <MiniCard key={n.uuid} node={n} latencyTracks={latencyTracks.get(n.uuid)} status={stableStatuses.get(n.uuid)} counters={stableCounters.get(n.uuid)} />
+                    ))}
+                  </div>
+                )} */}
+                {/* {hasResults && view === 'table' && <NodeTable nodes={list} onOpen={setSelected} statuses={stableStatuses} counters={stableCounters} />} */}
+                {/* {hasResults && view === 'map' && (
                   <Suspense
                     fallback={
                       <div className="py-24 flex items-center justify-center text-sm text-muted-foreground">
@@ -555,7 +563,7 @@ export function App() {
                   >
                     <WorldMap nodes={list} onOpen={setSelected} />
                   </Suspense>
-                )}
+                )} */}
 
                 {hasErrors && (
                   <Alert variant="warning">

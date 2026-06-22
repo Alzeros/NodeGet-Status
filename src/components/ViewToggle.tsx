@@ -1,11 +1,12 @@
-import { Globe, LayoutGrid, Table } from 'lucide-react'
+import { LayoutGrid, LayoutList } from 'lucide-react'
 import { type ReactNode } from 'react'
 import type { View } from '../types'
 
 const ITEMS: { value: View; label: string; icon: typeof LayoutGrid }[] = [
   { value: 'cards', label: '卡片', icon: LayoutGrid },
-  { value: 'table', label: '表格', icon: Table },
-  { value: 'map', label: '地图', icon: Globe },
+  // { value: 'mini', label: '迷你', icon: LayoutList },
+  // { value: 'table', label: '表格', icon: Table },
+  // { value: 'map', label: '地图', icon: Globe },
 ]
 
 export function ViewToggle({ value, onChange }: { value: View; onChange: (v: View) => void }) {

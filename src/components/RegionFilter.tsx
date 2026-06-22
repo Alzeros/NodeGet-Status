@@ -56,11 +56,11 @@ function Chip({
       type="button"
       onClick={onClick}
       className={cn(
-        'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-full border transition-colors',
+        'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-full border border-transparent transition-all duration-200',
         layout === 'vertical' && 'rounded-lg py-1.5 justify-start w-full',
         selected
-          ? 'bg-primary text-primary-foreground border-primary'
-          : 'bg-card text-foreground/80 border-border hover:bg-accent',
+          ? 'bg-primary text-primary-foreground shadow-sm'
+          : 'bg-secondary/40 text-foreground/80 hover:bg-secondary/80',
         className
       )}
     >

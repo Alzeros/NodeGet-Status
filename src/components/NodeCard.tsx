@@ -8,6 +8,7 @@ import { bytes, pct, relativeAge, uptime } from '../utils/format'
 import { cpuLabel, deriveUsage, displayName, distroLogo, osLabel, virtLabel } from '../utils/derive'
 import { cn, loadColor } from '../utils/cn'
 import type { LatencyTracks, IspKey } from '../utils/latency'
+import { UptimeBar } from './UptimeBar'
 import type { Node } from '../types'
 import type { ReactNode } from 'react'
 import { memo } from 'react'
@@ -118,7 +119,7 @@ export const NodeCard = memo<NodeCardProps>(function NodeCard({ node, latencyTra
     <a href={`#${encodeURIComponent(node.uuid)}`} className="block">
       <Card
         className={cn(
-          'p-4 transition hover:border-primary/50 hover:shadow-md flex flex-col gap-3',
+          'p-4 flex flex-col gap-3',
           !isOnline && 'opacity-60',
         )}
       >
@@ -175,42 +176,26 @@ export const NodeCard = memo<NodeCardProps>(function NodeCard({ node, latencyTra
               />
             ))}
           </div>
-          {/* 网络质量区域 — 始终渲染以保持卡片底部对齐 */}
-          <div className="flex flex-col gap-[4px]">
-            <span className="text-xs text-muted-foreground">网络质量 (30min)</span>
+          {/* 网络质量区域 — Uptime Robot 风格 */}
+          <div className="flex flex-col gap-[6px]">
+            <span className="text-xs text-muted-foreground">网络质量 (24h)</span>
             {hasNetworkQuality ? (
-              <div className="flex flex-col gap-[2px] w-full">
+              <div className="flex flex-col gap-[6px] w-full">
                 {(['cm', 'cu', 'ct'] as IspKey[]).map(ispKey => {
                   const track = latencyTracks?.[ispKey]
-                  const emptyBlocks = Array.from({ length: 10 }, () => null)
+                  const emptyBlocks: null[] = Array.from({ length: 24 }, () => null)
                   return (
                     <div key={ispKey} className="flex items-center gap-[6px]">
                       <span className="text-[10px] font-semibold text-muted-foreground w-7 shrink-0 text-center leading-none">
                         {track?.shortLabel ?? ispKey.toUpperCase()}
                       </span>
-                      <div
-                        className="grid flex-1"
-                        style={{ gridTemplateColumns: 'repeat(10, 1fr)', gap: '2px' }}
-                      >
-                        {(track?.blocks ?? emptyBlocks).map((b, i) => (
-                          <div
-                            key={i}
-                            className="group relative z-0 h-[12px] flex items-center justify-center cursor-pointer hover:z-10"
-                            title={
-                              b
-                                ? `${track!.label} | ${new Date(b.t).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} - ${new Date(b.t + 180000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
-延迟: ${b.avg?.toFixed(1) ?? '—'}ms | 丢包: ${b.lossCount}/${b.total}`
-                                : '无数据'
-                            }
-                          >
-                            <div
-                              className={cn(
-                                'relative w-full h-[10px] rounded-[2px] transition-all duration-150 group-hover:scale-125',
-                                b ? b.className : 'bg-muted-foreground/5',
-                              )}
-                            />
-                          </div>
-                        ))}
+                      <div className="flex-1 min-w-0">
+                        <UptimeBar
+                          blocks={track?.blocks ?? emptyBlocks}
+                          ispLabel={track?.label}
+                          barHeight={10}
+                          mode="latency"
+                        />
                       </div>
                     </div>
                   )

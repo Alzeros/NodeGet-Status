@@ -4,47 +4,47 @@
 
 @layer base {
   :root {
-    --background: 220 33% 98%;
-    --foreground: 222 47% 11%;
+    --background: 240 5% 96%; /* Apple light gray #f5f5f7 */
+    --foreground: 240 6% 10%; /* Apple charcoal #19191b */
     --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
+    --card-foreground: 240 6% 10%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
-    --primary: 217 91% 60%;
+    --popover-foreground: 240 6% 10%;
+    --primary: 211 100% 45%; /* Apple blue #0071e3 */
     --primary-foreground: 0 0% 100%;
-    --secondary: 220 14% 96%;
-    --secondary-foreground: 222 47% 11%;
-    --muted: 220 14% 96%;
-    --muted-foreground: 220 9% 46%;
-    --accent: 220 14% 96%;
-    --accent-foreground: 222 47% 11%;
-    --destructive: 0 72% 51%;
+    --secondary: 240 5% 91%; /* Apple gray #e8e8ed */
+    --secondary-foreground: 240 6% 10%;
+    --muted: 240 5% 91%;
+    --muted-foreground: 240 4% 50%; /* #808085 */
+    --accent: 240 5% 91%;
+    --accent-foreground: 240 6% 10%;
+    --destructive: 355 76% 59%; /* Apple red #e35050 */
     --destructive-foreground: 0 0% 98%;
-    --border: 220 14% 92%;
-    --input: 220 14% 92%;
-    --ring: 217 91% 60%;
-    --radius: 0.75rem;
+    --border: 240 5% 88%; /* #dfdfe3 */
+    --input: 240 5% 88%;
+    --ring: 211 100% 45%;
+    --radius: 1rem; /* macOS 16px radius */
   }
   .dark {
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 240 10% 5.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 240 10% 5.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 217 91% 60%;
+    --background: 240 10% 4%; /* Space black #09090b */
+    --foreground: 240 5% 96%; /* #f5f5f7 */
+    --card: 240 10% 7%; /* Space gray #121214 */
+    --card-foreground: 240 5% 96%;
+    --popover: 240 10% 7%;
+    --popover-foreground: 240 5% 96%;
+    --primary: 211 100% 50%; /* Apple blue dark #0077ed */
     --primary-foreground: 0 0% 100%;
-    --secondary: 240 3.7% 15.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
-    --accent: 240 3.7% 15.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
+    --secondary: 240 4% 16%; /* #28282a */
+    --secondary-foreground: 240 5% 96%;
+    --muted: 240 4% 16%;
+    --muted-foreground: 240 4% 65%; /* #a0a0a5 */
+    --accent: 240 4% 16%;
+    --accent-foreground: 240 5% 96%;
+    --destructive: 355 72% 50%; /* #d33c3c */
     --destructive-foreground: 0 0% 98%;
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 217 91% 60%;
+    --border: 240 4% 18%; /* #2c2c2e */
+    --input: 240 4% 18%;
+    --ring: 211 100% 50%;
   }
   * {
     @apply border-border;
@@ -74,35 +74,67 @@
 }
 
 .bg-soft {
-  background-color: hsl(220 33% 98%);
+  background-color: hsl(240 5% 96%);
   background-image:
-    radial-gradient(60rem 36rem at 12% -10%, rgba(99, 102, 241, 0.16), transparent 60%),
-    radial-gradient(48rem 32rem at 95% 0%, rgba(56, 189, 248, 0.18), transparent 60%),
-    radial-gradient(42rem 28rem at 85% 95%, rgba(244, 114, 182, 0.12), transparent 60%),
-    radial-gradient(38rem 30rem at 5% 90%, rgba(34, 197, 94, 0.10), transparent 60%);
+    radial-gradient(120rem 80rem at 50% -20%, rgba(0, 113, 227, 0.08), transparent 60%),
+    radial-gradient(100rem 60rem at 10% 20%, rgba(139, 92, 246, 0.06), transparent 60%),
+    radial-gradient(80rem 60rem at 90% 80%, rgba(78, 201, 122, 0.06), transparent 60%);
   background-attachment: fixed;
 }
 
 .dark .bg-soft {
   background-color: hsl(var(--background));
-  background-image: radial-gradient(hsl(var(--border)) 1px, transparent 1px);
-  background-size: 22px 22px;
-  mask-image: radial-gradient(ellipse at top, black 40%, transparent 90%);
+  background-image:
+    radial-gradient(120rem 80rem at 50% -20%, rgba(0, 119, 237, 0.12), transparent 60%),
+    radial-gradient(100rem 60rem at 10% 20%, rgba(139, 92, 246, 0.08), transparent 50%),
+    radial-gradient(80rem 60rem at 90% 80%, rgba(95, 166, 122, 0.08), transparent 50%);
+  background-attachment: fixed;
 }
 
 .card-soft {
+  position: relative;
+  z-index: 1;
   background-color: rgba(255, 255, 255, 0.78);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(12px) saturate(160%);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.6) !important;
   box-shadow:
-    0 1px 2px rgba(15, 23, 42, 0.04),
-    0 8px 24px -12px rgba(15, 23, 42, 0.10);
+    0 1px 2px rgba(0, 0, 0, 0.01),
+    0 8px 32px -4px rgba(0, 0, 0, 0.03);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
+
+.card-soft:hover {
+  z-index: 10;
+  background-color: rgba(255, 255, 255, 0.88);
+  border-color: rgba(0, 113, 227, 0.3) !important;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.01),
+    0 16px 48px -8px rgba(0, 0, 0, 0.06);
+  transform: translateY(-2px);
+}
+
 .dark .card-soft {
-  background-color: hsl(var(--card));
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  position: relative;
+  z-index: 1;
+  background-color: rgba(24, 24, 27, 0.72);
+  backdrop-filter: blur(12px) saturate(160%);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.2),
+    0 8px 32px -4px rgba(0, 0, 0, 0.3);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dark .card-soft:hover {
+  z-index: 10;
+  background-color: rgba(24, 24, 27, 0.82);
+  border-color: rgba(0, 119, 237, 0.4) !important;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.3),
+    0 16px 48px -8px rgba(0, 0, 0, 0.5);
+  transform: translateY(-2px);
 }
 
 .metric-nowrap {
@@ -130,4 +162,47 @@
 }
 .sidebar-scroll:hover::-webkit-scrollbar-thumb {
   background-color: hsl(var(--muted-foreground) / 0.25);
+}
+
+@layer utilities {
+  /* Unified Status Colors (High Contrast Morandi Palette) */
+  .bg-emerald-500 { background-color: #4ec97a !important; }
+  .bg-amber-500 { background-color: #dba54a !important; }
+  .bg-rose-500 { background-color: #e06b63 !important; }
+  
+  .dark .bg-emerald-500 { background-color: #5fa67a !important; }
+  .dark .bg-amber-500 { background-color: #c9923e !important; }
+  .dark .bg-rose-500 { background-color: #c25d56 !important; }
+
+  .text-emerald-500 { color: #4ec97a !important; }
+  .text-emerald-600 { color: #4ec97a !important; }
+  .text-amber-500 { color: #dba54a !important; }
+  .text-amber-600 { color: #dba54a !important; }
+  .text-rose-500 { color: #e06b63 !important; }
+  .text-rose-600 { color: #e06b63 !important; }
+  .text-green-500 { color: #4ec97a !important; }
+  
+  .dark .text-emerald-500 { color: #5fa67a !important; }
+  .dark .text-emerald-600 { color: #5fa67a !important; }
+  .dark .text-amber-500 { color: #c9923e !important; }
+  .dark .text-amber-600 { color: #c9923e !important; }
+  .dark .text-rose-500 { color: #c25d56 !important; }
+  .dark .text-rose-600 { color: #c25d56 !important; }
+  .dark .text-green-500 { color: #5fa67a !important; }
+
+  .stroke-emerald-500 { stroke: #4ec97a !important; }
+  .stroke-amber-500 { stroke: #dba54a !important; }
+  .stroke-rose-500 { stroke: #e06b63 !important; }
+  
+  .dark .stroke-emerald-500 { stroke: #5fa67a !important; }
+  .dark .stroke-amber-500 { stroke: #c9923e !important; }
+  .dark .stroke-rose-500 { stroke: #c25d56 !important; }
+
+  .ring-emerald-500\/25 { --tw-ring-color: rgba(78, 201, 122, 0.25) !important; }
+  .ring-amber-500\/25 { --tw-ring-color: rgba(219, 165, 74, 0.25) !important; }
+  .ring-rose-500\/25 { --tw-ring-color: rgba(224, 107, 99, 0.25) !important; }
+
+  .dark .ring-emerald-500\/25 { --tw-ring-color: rgba(95, 166, 122, 0.25) !important; }
+  .dark .ring-amber-500\/25 { --tw-ring-color: rgba(201, 146, 62, 0.25) !important; }
+  .dark .ring-rose-500\/25 { --tw-ring-color: rgba(194, 93, 86, 0.25) !important; }
 }

@@ -113,13 +113,13 @@ export function NodeDetail({ node, onClose, showSource, pool }: Props) {
   return (
     <div
       ref={scrollRef}
-      className="w-full bg-card text-card-foreground rounded-2xl border border-[#f0f0f0] dark:border-border/10 shadow-[0_4px_20px_rgba(0,0,0,0.03)] animate-in slide-in-from-right fade-in duration-300"
+      className="w-full bg-card text-card-foreground rounded-2xl animate-in slide-in-from-right fade-in duration-300 card-soft hover:translate-y-0"
     >
       <div
         ref={headerRef}
-        className={`sticky top-[60px] z-10 rounded-t-2xl transition-[background-color,backdrop-filter,border-color] duration-200 bg-card/90 backdrop-blur-md ${
+        className={`sticky top-[60px] z-10 rounded-t-2xl transition-[background-color,backdrop-filter,border-color] duration-200 bg-card/75 backdrop-blur-md ${
           stuck
-            ? 'border-b border-border/40 shadow-sm'
+            ? 'border-b border-border/30 shadow-sm'
             : 'border-b border-transparent'
         }`}
       >
@@ -387,7 +387,7 @@ export function NodeDetail({ node, onClose, showSource, pool }: Props) {
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <Card className="p-5">
+    <Card className="p-5 hover:translate-y-0">
       <div className="text-xs uppercase tracking-wide text-muted-foreground mb-3">{title}</div>
       {children}
     </Card>
@@ -458,7 +458,7 @@ function Spark({ data, dataKey, label, stroke, domain, format }: SparkProps) {
   const last = Number(data.at(-1)?.[dataKey] ?? 0)
   const id = `g-${dataKey}`
   return (
-    <div className="rounded-md border bg-card/50 p-3">
+    <div className="rounded-xl border border-border/40 bg-card/45 backdrop-blur-sm p-3">
       <div className="flex justify-between text-[11px] mb-1">
         <span className="text-muted-foreground">{label}</span>
         <span className="font-mono">{format(last)}</span>

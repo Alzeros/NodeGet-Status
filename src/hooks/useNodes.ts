@@ -402,7 +402,7 @@ export function useNodes(config: SiteConfig | null) {
     const tickLatency = async () => {
       if (!pool) return
       const now = Date.now()
-      const window: [number, number] = [now - 30 * 60 * 1000, now]
+      const window: [number, number] = [now - 24 * 60 * 60 * 1000, now]
       const updates = new Map<string, LatencyTracks>()
 
       await Promise.allSettled(
@@ -417,12 +417,12 @@ export function useNodes(config: SiteConfig | null) {
               batch.map(async uuid => {
                 const rows = await taskQuery(
                   entry.client,
-                  [{ uuid }, { timestamp_from_to: window }, { type: 'ping' }, { limit: 200 }],
+                  [{ uuid }, { timestamp_from_to: window }, { type: 'ping' }, { limit: 6000 }],
                   LATENCY_QUERY_TIMEOUT,
                 )
                 const agent = agentsRef.current.get(uuid)
                 const region = agent?.meta?.region
-                const tracks = buildLatencyTracks(rows, region, 10, 180000)
+                const tracks = buildLatencyTracks(rows, region, 24, 3600000)
                 return { uuid, tracks, hasData: rows.length > 0 }
               }),
             )
