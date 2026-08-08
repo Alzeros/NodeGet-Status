@@ -1,8 +1,44 @@
 import { ArrowDown, ArrowLeftRight, ArrowUp, Database, Globe, Server } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { useSmoothNumber } from '../hooks/useSmoothNumber'
 import { bytesParts } from '../utils/format'
 import { Sparkline } from './Sparkline'
-import { getStatusColor } from '../utils/cn'
+import { cn, getStatusColor } from '../utils/cn'
+
+/*
+ * 实时数值每 2s 刷新，而 prettyBytes 会同时改变两件事：
+ *   1. 单位在 B / KiB / MiB / GiB 之间切换（字符数 1↔3）
+ *   2. 数字在整数与小数之间切换（"145" ↔ "1.14"，3 sig figs）
+ * 若不锁定宽度，整行（含分隔符与后续内容）会被推着左右抖动、看起来发糊。
+ * 因此：数字用 tabular-nums 等宽并右对齐固定宽度，单位左对齐固定宽度，
+ * 两者合起来占据恒定横向空间，与具体数值无关。
+ */
+function Num({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <span
+      className={cn('inline-block text-right tabular-nums', className)}
+      style={{ minWidth: '4ch' }}
+    >
+      {children}
+    </span>
+  )
+}
+
+function Unit({
+  children,
+  className,
+  width = '3.5ch',
+}: {
+  children: ReactNode
+  className?: string
+  width?: string
+}) {
+  return (
+    <span className={cn('inline-block text-left', className)} style={{ minWidth: width }}>
+      {children}
+    </span>
+  )
+}
 
 interface Props {
   onlineCount: number
@@ -102,10 +138,10 @@ export function GlobalStats({
             </div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1">
-                <span className={`text-2xl font-bold ${statusColor.text}`}>
+                <span className={`text-2xl font-bold tabular-nums ${statusColor.text}`}>
                   {onlineCount}
                 </span>
-                <span className="text-lg text-gray-400 dark:text-gray-500 font-normal">/ {totalCount}</span>
+                <span className="text-lg text-gray-400 dark:text-gray-500 font-normal tabular-nums">/ {totalCount}</span>
               </div>
               <CircularProgress value={onlineRatio} colorClass={statusColor.ring} size={36} />
             </div>
@@ -122,14 +158,14 @@ export function GlobalStats({
           <div className="flex items-center justify-between mb-2.5">
             <div className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
               <ArrowUp className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} />
-              <span className="text-lg font-bold">{netOutParts.num}</span>
-              <span className="text-xs opacity-85">{netOutParts.unit}/s</span>
+              <Num className="text-lg font-bold">{netOutParts.num}</Num>
+              <Unit className="text-xs opacity-85" width="4.5ch">{netOutParts.unit}/s</Unit>
             </div>
             <span className="text-muted-foreground/20">|</span>
             <div className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
               <ArrowDown className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} />
-              <span className="text-lg font-bold">{netInParts.num}</span>
-              <span className="text-xs opacity-85">{netInParts.unit}/s</span>
+              <Num className="text-lg font-bold">{netInParts.num}</Num>
+              <Unit className="text-xs opacity-85" width="4.5ch">{netInParts.unit}/s</Unit>
             </div>
           </div>
           {netInHistory.length > 1 && (
@@ -147,19 +183,19 @@ export function GlobalStats({
           </div>
           <div className="flex items-center justify-between px-4">
             <div className="flex items-baseline gap-0.5">
-              <span className="text-2xl font-bold text-foreground">{trafficParts.num}</span>
-              <span className="text-xs text-muted-foreground">{trafficParts.unit}</span>
+              <Num className="text-2xl font-bold text-foreground">{trafficParts.num}</Num>
+              <Unit className="text-xs text-muted-foreground">{trafficParts.unit}</Unit>
             </div>
             <div className="flex flex-col items-end gap-0.5 text-[10px] leading-tight text-muted-foreground/80">
               <span className="flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400 font-medium">
                 <ArrowUp className="h-3 w-3 shrink-0" strokeWidth={1.5} />
-                <span>{upParts.num}</span>
-                <span className="text-[9px] opacity-80 ml-0.5">{upParts.unit}</span>
+                <Num>{upParts.num}</Num>
+                <Unit className="text-[9px] opacity-80 ml-0.5" width="3ch">{upParts.unit}</Unit>
               </span>
               <span className="flex items-center gap-0.5 text-blue-600 dark:text-blue-400 font-medium">
                 <ArrowDown className="h-3 w-3 shrink-0" strokeWidth={1.5} />
-                <span>{downParts.num}</span>
-                <span className="text-[9px] opacity-80 ml-0.5">{downParts.unit}</span>
+                <Num>{downParts.num}</Num>
+                <Unit className="text-[9px] opacity-80 ml-0.5" width="3ch">{downParts.unit}</Unit>
               </span>
             </div>
           </div>
@@ -192,10 +228,10 @@ export function GlobalStats({
             节点概览
           </div>
           <div className="shrink-0 h-auto md:h-6 flex items-center gap-1 leading-none md:whitespace-nowrap md:overflow-hidden">
-            <span className={`text-base md:text-xl font-bold ${statusColor.text}`}>
+            <span className={`text-base md:text-xl font-bold tabular-nums ${statusColor.text}`}>
               {onlineCount}
             </span>
-            <span className="text-sm md:text-xl text-gray-400 dark:text-gray-500 font-normal">/ {totalCount}</span>
+            <span className="text-sm md:text-xl text-gray-400 dark:text-gray-500 font-normal tabular-nums">/ {totalCount}</span>
           </div>
           <div className="hidden md:flex shrink-0 h-6 items-center leading-none overflow-hidden">
             <span className="text-[10px] text-muted-foreground/60">Online</span>
@@ -216,24 +252,24 @@ export function GlobalStats({
           <div className="shrink-0 md:hidden flex flex-col items-end leading-none gap-0.5">
             <span className="flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400">
               <ArrowUp className="h-3 w-3 shrink-0" strokeWidth={1.5} />
-              <span className="text-sm font-semibold">{netOutParts.num}</span>
-              <span className="text-[10px] font-normal">{netOutParts.unit}/s</span>
+              <Num className="text-sm font-semibold">{netOutParts.num}</Num>
+              <Unit className="text-[10px] font-normal" width="4.5ch">{netOutParts.unit}/s</Unit>
             </span>
             <span className="flex items-center gap-0.5 text-blue-600 dark:text-blue-400">
               <ArrowDown className="h-3 w-3 shrink-0" strokeWidth={1.5} />
-              <span className="text-sm font-semibold">{netInParts.num}</span>
-              <span className="text-[10px] font-normal">{netInParts.unit}/s</span>
+              <Num className="text-sm font-semibold">{netInParts.num}</Num>
+              <Unit className="text-[10px] font-normal" width="4.5ch">{netInParts.unit}/s</Unit>
             </span>
           </div>
           <div className="hidden md:flex shrink-0 h-6 items-center gap-1.5 leading-none whitespace-nowrap overflow-hidden">
             <ArrowUp className="h-4 w-4 text-emerald-500 shrink-0" strokeWidth={1.5} />
-            <span className="text-xl font-bold text-emerald-600 dark:text-emerald-400">{netOutParts.num}</span>
-            <span className="text-xs text-emerald-600/70 dark:text-emerald-400/70 font-normal">{netOutParts.unit}/s</span>
+            <Num className="text-xl font-bold text-emerald-600 dark:text-emerald-400">{netOutParts.num}</Num>
+            <Unit className="text-xs text-emerald-600/70 dark:text-emerald-400/70 font-normal" width="4.5ch">{netOutParts.unit}/s</Unit>
           </div>
           <div className="hidden md:flex shrink-0 h-6 items-center gap-1.5 leading-none whitespace-nowrap overflow-hidden">
             <ArrowDown className="h-4 w-4 text-blue-500 shrink-0" strokeWidth={1.5} />
-            <span className="text-xl font-bold text-blue-600 dark:text-blue-400">{netInParts.num}</span>
-            <span className="text-xs text-blue-600/70 dark:text-blue-400/70 font-normal">{netInParts.unit}/s</span>
+            <Num className="text-xl font-bold text-blue-600 dark:text-blue-400">{netInParts.num}</Num>
+            <Unit className="text-xs text-blue-600/70 dark:text-blue-400/70 font-normal" width="4.5ch">{netInParts.unit}/s</Unit>
           </div>
         </div>
         <div className="hidden md:flex shrink-0 w-20 h-10 items-center justify-center">
@@ -251,20 +287,20 @@ export function GlobalStats({
             本月流量
           </div>
           <div className="shrink-0 h-auto md:h-6 flex items-center gap-1.5 leading-none md:whitespace-nowrap md:overflow-hidden">
-            <span className="text-base md:text-xl font-bold text-foreground">{trafficParts.num}</span>
-            <span className="text-sm md:text-xs text-muted-foreground font-normal">{trafficParts.unit}</span>
+            <Num className="text-base md:text-xl font-bold text-foreground">{trafficParts.num}</Num>
+            <Unit className="text-sm md:text-xs text-muted-foreground font-normal">{trafficParts.unit}</Unit>
           </div>
           <div className="hidden md:flex shrink-0 h-6 items-center gap-2 leading-none whitespace-nowrap overflow-hidden">
             <span className="flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400">
               <ArrowUp className="h-3 w-3 shrink-0" strokeWidth={1.5} />
-              <span className="text-sm font-medium">{upParts.num}</span>
-              <span className="text-[10px] font-normal">{upParts.unit}</span>
+              <Num className="text-sm font-medium">{upParts.num}</Num>
+              <Unit className="text-[10px] font-normal" width="3ch">{upParts.unit}</Unit>
             </span>
             <span className="text-muted-foreground/40 text-xs">|</span>
             <span className="flex items-center gap-0.5 text-blue-600 dark:text-blue-400">
               <ArrowDown className="h-3 w-3 shrink-0" strokeWidth={1.5} />
-              <span className="text-sm font-medium">{downParts.num}</span>
-              <span className="text-[10px] font-normal">{downParts.unit}</span>
+              <Num className="text-sm font-medium">{downParts.num}</Num>
+              <Unit className="text-[10px] font-normal" width="3ch">{downParts.unit}</Unit>
             </span>
           </div>
         </div>

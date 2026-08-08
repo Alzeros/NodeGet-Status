@@ -149,3 +149,6 @@ public/config.json
 .idea
 nodeget-theme.dev.json
 nodeget-theme.dev.jsonc
+# macOS
+.DS_Store
+**/.DS_Store

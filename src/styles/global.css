@@ -10,7 +10,7 @@
     --card-foreground: 240 6% 10%;
     --popover: 0 0% 100%;
     --popover-foreground: 240 6% 10%;
-    --primary: 211 100% 45%; /* Apple blue #0071e3 */
+    --primary: 211 78% 46%; /* 柔化蓝 #1a72d1，与莫兰迪状态色同频（原 #0071e3 饱和度 100% 过跳） */
     --primary-foreground: 0 0% 100%;
     --secondary: 240 5% 91%; /* Apple gray #e8e8ed */
     --secondary-foreground: 240 6% 10%;
@@ -22,17 +22,17 @@
     --destructive-foreground: 0 0% 98%;
     --border: 240 5% 88%; /* #dfdfe3 */
     --input: 240 5% 88%;
-    --ring: 211 100% 45%;
+    --ring: 211 78% 46%;
     --radius: 1rem; /* macOS 16px radius */
   }
   .dark {
     --background: 240 10% 4%; /* Space black #09090b */
     --foreground: 240 5% 96%; /* #f5f5f7 */
-    --card: 240 10% 7%; /* Space gray #121214 */
+    --card: 240 6% 11%; /* #1a1a1d —— 与背景拉开约 7% 明度差，卡片才能"浮"起来 */
     --card-foreground: 240 5% 96%;
-    --popover: 240 10% 7%;
+    --popover: 240 6% 11%;
     --popover-foreground: 240 5% 96%;
-    --primary: 211 100% 50%; /* Apple blue dark #0077ed */
+    --primary: 211 78% 52%; /* 柔化蓝 #2581e4 */
     --primary-foreground: 0 0% 100%;
     --secondary: 240 4% 16%; /* #28282a */
     --secondary-foreground: 240 5% 96%;
@@ -42,9 +42,9 @@
     --accent-foreground: 240 5% 96%;
     --destructive: 355 72% 50%; /* #d33c3c */
     --destructive-foreground: 0 0% 98%;
-    --border: 240 4% 18%; /* #2c2c2e */
-    --input: 240 4% 18%;
-    --ring: 211 100% 50%;
+    --border: 240 5% 22%; /* #35353a —— 暗色下阴影几乎不可见，靠边框划分层次 */
+    --input: 240 5% 22%;
+    --ring: 211 78% 52%;
   }
   * {
     @apply border-border;
@@ -76,18 +76,18 @@
 .bg-soft {
   background-color: hsl(240 5% 96%);
   background-image:
-    radial-gradient(120rem 80rem at 50% -20%, rgba(0, 113, 227, 0.08), transparent 60%),
+    radial-gradient(120rem 80rem at 50% -20%, rgba(26, 114, 209, 0.08), transparent 60%),
     radial-gradient(100rem 60rem at 10% 20%, rgba(139, 92, 246, 0.06), transparent 60%),
-    radial-gradient(80rem 60rem at 90% 80%, rgba(78, 201, 122, 0.06), transparent 60%);
+    radial-gradient(80rem 60rem at 90% 80%, rgba(62, 204, 121, 0.06), transparent 60%);
   background-attachment: fixed;
 }
 
 .dark .bg-soft {
   background-color: hsl(var(--background));
   background-image:
-    radial-gradient(120rem 80rem at 50% -20%, rgba(0, 119, 237, 0.12), transparent 60%),
+    radial-gradient(120rem 80rem at 50% -20%, rgba(37, 129, 228, 0.12), transparent 60%),
     radial-gradient(100rem 60rem at 10% 20%, rgba(139, 92, 246, 0.08), transparent 50%),
-    radial-gradient(80rem 60rem at 90% 80%, rgba(95, 166, 122, 0.08), transparent 50%);
+    radial-gradient(80rem 60rem at 90% 80%, rgba(67, 177, 113, 0.08), transparent 50%);
   background-attachment: fixed;
 }
 
@@ -107,7 +107,7 @@
 .card-soft:hover {
   z-index: 10;
   background-color: rgba(255, 255, 255, 0.88);
-  border-color: rgba(0, 113, 227, 0.3) !important;
+  border-color: rgba(26, 114, 209, 0.3) !important;
   box-shadow:
     0 1px 2px rgba(0, 0, 0, 0.01),
     0 16px 48px -8px rgba(0, 0, 0, 0.06);
@@ -117,10 +117,10 @@
 .dark .card-soft {
   position: relative;
   z-index: 1;
-  background-color: rgba(24, 24, 27, 0.72);
+  background-color: rgba(26, 26, 30, 0.72);
   backdrop-filter: blur(12px) saturate(160%);
   -webkit-backdrop-filter: blur(12px) saturate(160%);
-  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
   box-shadow:
     0 1px 2px rgba(0, 0, 0, 0.2),
     0 8px 32px -4px rgba(0, 0, 0, 0.3);
@@ -129,12 +129,53 @@
 
 .dark .card-soft:hover {
   z-index: 10;
-  background-color: rgba(24, 24, 27, 0.82);
-  border-color: rgba(0, 119, 237, 0.4) !important;
+  background-color: rgba(30, 30, 35, 0.82);
+  border-color: rgba(37, 129, 228, 0.4) !important;
   box-shadow:
     0 1px 2px rgba(0, 0, 0, 0.3),
     0 16px 48px -8px rgba(0, 0, 0, 0.5);
   transform: translateY(-2px);
+}
+
+/* 实心卡片：用于节点列表等大批量卡片。
+   背景渐变只有 6~8% 不透明度，backdrop-filter 几乎糊不出东西，
+   却让每张卡都背一层合成开销；列表卡改实心，玻璃只留给顶部概览卡。 */
+.card-flat {
+  position: relative;
+  z-index: 1;
+  background-color: hsl(var(--card));
+  border-color: hsl(var(--border));
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.02),
+    0 4px 16px -6px rgba(0, 0, 0, 0.05);
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
+}
+
+.card-flat:hover {
+  z-index: 10;
+  border-color: rgba(26, 114, 209, 0.35);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.02),
+    0 10px 28px -8px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+}
+
+.dark .card-flat {
+  background-color: hsl(var(--card));
+  border-color: hsl(var(--border));
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.3),
+    0 4px 16px -6px rgba(0, 0, 0, 0.4);
+}
+
+.dark .card-flat:hover {
+  border-color: rgba(37, 129, 228, 0.45);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.4),
+    0 10px 28px -8px rgba(0, 0, 0, 0.55);
 }
 
 .metric-nowrap {
@@ -165,44 +206,46 @@
 }
 
 @layer utilities {
-  /* Unified Status Colors (High Contrast Morandi Palette) */
-  .bg-emerald-500 { background-color: #4ec97a !important; }
+  /* 统一状态色（高对比莫兰迪）
+     绿色原为 #4ec97a(S≈53%)，明显低于琥珀/玫红(S≈67%)，是套色里的异类；
+     微调至 S≈58% 与另两色同频，仍保留莫兰迪的低喧哗感。 */
+  .bg-emerald-500 { background-color: #3ecc79 !important; }
   .bg-amber-500 { background-color: #dba54a !important; }
   .bg-rose-500 { background-color: #e06b63 !important; }
-  
-  .dark .bg-emerald-500 { background-color: #5fa67a !important; }
+
+  .dark .bg-emerald-500 { background-color: #43b171 !important; }
   .dark .bg-amber-500 { background-color: #c9923e !important; }
   .dark .bg-rose-500 { background-color: #c25d56 !important; }
 
-  .text-emerald-500 { color: #4ec97a !important; }
-  .text-emerald-600 { color: #4ec97a !important; }
+  .text-emerald-500 { color: #3ecc79 !important; }
+  .text-emerald-600 { color: #3ecc79 !important; }
   .text-amber-500 { color: #dba54a !important; }
   .text-amber-600 { color: #dba54a !important; }
   .text-rose-500 { color: #e06b63 !important; }
   .text-rose-600 { color: #e06b63 !important; }
-  .text-green-500 { color: #4ec97a !important; }
-  
-  .dark .text-emerald-500 { color: #5fa67a !important; }
-  .dark .text-emerald-600 { color: #5fa67a !important; }
+  .text-green-500 { color: #3ecc79 !important; }
+
+  .dark .text-emerald-500 { color: #43b171 !important; }
+  .dark .text-emerald-600 { color: #43b171 !important; }
   .dark .text-amber-500 { color: #c9923e !important; }
   .dark .text-amber-600 { color: #c9923e !important; }
   .dark .text-rose-500 { color: #c25d56 !important; }
   .dark .text-rose-600 { color: #c25d56 !important; }
-  .dark .text-green-500 { color: #5fa67a !important; }
+  .dark .text-green-500 { color: #43b171 !important; }
 
-  .stroke-emerald-500 { stroke: #4ec97a !important; }
+  .stroke-emerald-500 { stroke: #3ecc79 !important; }
   .stroke-amber-500 { stroke: #dba54a !important; }
   .stroke-rose-500 { stroke: #e06b63 !important; }
-  
-  .dark .stroke-emerald-500 { stroke: #5fa67a !important; }
+
+  .dark .stroke-emerald-500 { stroke: #43b171 !important; }
   .dark .stroke-amber-500 { stroke: #c9923e !important; }
   .dark .stroke-rose-500 { stroke: #c25d56 !important; }
 
-  .ring-emerald-500\/25 { --tw-ring-color: rgba(78, 201, 122, 0.25) !important; }
+  .ring-emerald-500\/25 { --tw-ring-color: rgba(62, 204, 121, 0.25) !important; }
   .ring-amber-500\/25 { --tw-ring-color: rgba(219, 165, 74, 0.25) !important; }
   .ring-rose-500\/25 { --tw-ring-color: rgba(224, 107, 99, 0.25) !important; }
 
-  .dark .ring-emerald-500\/25 { --tw-ring-color: rgba(95, 166, 122, 0.25) !important; }
+  .dark .ring-emerald-500\/25 { --tw-ring-color: rgba(67, 177, 113, 0.25) !important; }
   .dark .ring-amber-500\/25 { --tw-ring-color: rgba(201, 146, 62, 0.25) !important; }
   .dark .ring-rose-500\/25 { --tw-ring-color: rgba(194, 93, 86, 0.25) !important; }
 }

@@ -17,7 +17,7 @@ export interface UptimeBarProps {
  * Dark:   green → 玉石绿    yellow → 蜜糖金    red → 赤陶红
  */
 const MORANDI = {
-  green:  { light: '#5fa67a', dark: '#4ec97a' },
+  green:  { light: '#43b171', dark: '#3ecc79' },
   yellow: { light: '#c9923e', dark: '#dba54a' },
   red:    { light: '#c25d56', dark: '#e06b63' },
   empty:  { light: 'rgba(0,0,0,0.06)', dark: 'rgba(255,255,255,0.08)' },

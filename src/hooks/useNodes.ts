@@ -243,6 +243,9 @@ export function useNodes(config: SiteConfig | null) {
   const [history, setHistory] = useState<Map<string, HistorySample[]>>(new Map())
   const [errors, setErrors] = useState<BackendError[]>([])
   const [loading, setLoading] = useState(true)
+  // 元数据(节点名/地区/标签)是否已到齐。uuid 列表先到、元数据后到，
+  // 期间 displayName() 只能显示 uuid 前 8 位；用它驱动骨架屏遮住这段闪烁。
+  const [metaHydrated, setMetaHydrated] = useState(false)
   const [tick, setTick] = useState(0)
   const [pool, setPool] = useState<BackendPool | null>(null)
   const [latencyTracks, setLatencyTracks] = useState<Map<string, LatencyTracks>>(new Map())
@@ -253,10 +256,18 @@ export function useNodes(config: SiteConfig | null) {
 
   useEffect(() => {
     setErrors([])
-    if (!config?.site_tokens?.length) {
+    setMetaHydrated(false)
+    // config.json 还没到：保持 loading。
+    // 否则这里会把 loading 置为 false 且再不置回，导致 config 到达后
+    // hasNodes 仍为 false、loading 已 false —— 页面闪现一下"暂无节点"，
+    // 首屏骨架屏也因此永远不显示。
+    if (!config) return
+    if (!config.site_tokens?.length) {
       setLoading(false)
+      setMetaHydrated(true)
       return
     }
+    setLoading(true)
     const pool = new BackendPool(config.site_tokens)
     setPool(pool)
     const sourceUuids = new Map<string, string[]>()
@@ -355,7 +366,7 @@ export function useNodes(config: SiteConfig | null) {
             return next
           })
         }),
-      )
+      ).finally(() => setMetaHydrated(true))
 
       // 动态数据首次加载——它决定何时解除 loading
       const dynamicFirstLoad = tickDynamic().then(() => setLoading(false))
@@ -446,6 +457,8 @@ export function useNodes(config: SiteConfig | null) {
       .catch((e: unknown) => {
         setErrors(prev => [...prev, { source: '*', error: e }])
         setLoading(false)
+        // 失败时也要放行，否则骨架屏会一直转
+        setMetaHydrated(true)
       })
 
     const onVisible = () => {
@@ -492,5 +505,5 @@ export function useNodes(config: SiteConfig | null) {
     return out
   }, [agents, live, history, monthlyTraffic, tick])
 
-  return { nodes, errors, loading, pool, latencyTracks }
+  return { nodes, errors, loading, pool, latencyTracks, metaHydrated }
 }

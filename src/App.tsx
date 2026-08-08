@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, ChevronDown, Loader2, Server } from 'lucide-react'
+import { AlertTriangle, ChevronDown, Loader2, Server, SlidersHorizontal } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from './components/ui/alert'
 import { useConfig } from './hooks/useConfig'
 import { useNodes } from './hooks/useNodes'
@@ -11,6 +11,7 @@ import { NodeCard } from './components/NodeCard'
 import { MiniCard } from './components/MiniCard'
 import { NodeTable } from './components/NodeTable'
 import { NodeDetail } from './components/NodeDetail'
+import { NodeCardSkeletonGrid } from './components/NodeCardSkeleton'
 import { TagFilter } from './components/TagFilter'
 import { RegionFilter } from './components/RegionFilter'
 import { cn, getStatusColor } from './utils/cn'
@@ -45,7 +46,7 @@ const num = (v?: number) => (Number.isFinite(v) ? (v as number) : -Infinity)
 
 export function App() {
   const { config, error: configError } = useConfig()
-  const { nodes, errors, loading, pool, latencyTracks } = useNodes(config)
+  const { nodes, errors, loading, pool, latencyTracks, metaHydrated } = useNodes(config)
   const { counters: stableCounters, statuses: stableStatuses } = useStableStatus(nodes)
   const bandwidthHistoryRef = useRef<number[]>([])
   const trafficHistoryRef = useRef<number[]>([])
@@ -118,6 +119,8 @@ export function App() {
   const [selected, setSelected] = useState<string | null>(readHash)
   const [regionsExpanded, setRegionsExpanded] = useState(true)
   const [statusExpanded, setStatusExpanded] = useState(true)
+  // 移动端筛选面板默认收起：地区 chip 常有 10+ 个，展开会把节点卡挤出首屏
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
 
   useEffect(() => {
     localStorage.setItem(VIEW_KEY, view)
@@ -294,10 +297,15 @@ export function App() {
   const logo = config.user_preferences.site_logo || DEFAULT_LOGO
   const hasErrors = errors.length > 0
   const hasNodes = globalStats.totalCount > 0
+  // uuid 列表已到但元数据未到：此时节点名只能显示 uuid 前 8 位，
+  // 先用骨架屏顶住，避免"哈希 → 真实名"的闪烁。
+  const hydrating = hasNodes && !metaHydrated
   const hasResults = list.length > 0
-  const noResults = hasNodes && !hasResults
+  const noResults = hasNodes && !hasResults && !hydrating
   const showInitialLoading = !hasNodes && loading && !hasErrors
   const showNoNodes = !hasNodes && (!loading || hasErrors)
+  // 移动端折叠面板收起时，用角标提示当前生效的筛选条数
+  const activeFilterCount = [activeRegion, activeTag, activeStatus].filter(Boolean).length
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -330,10 +338,10 @@ export function App() {
                     return (
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1">
-                          <span className={cn("text-2xl font-bold", statusColor.text)}>
+                          <span className={cn("text-2xl font-bold tabular-nums", statusColor.text)}>
                             {globalStats.onlineCount}
                           </span>
-                          <span className="text-lg text-gray-400 dark:text-gray-500 font-normal">/ {globalStats.totalCount}</span>
+                          <span className="text-lg text-gray-400 dark:text-gray-500 font-normal tabular-nums">/ {globalStats.totalCount}</span>
                         </div>
                         <CircularProgress
                           value={globalStats.totalCount > 0 ? globalStats.onlineCount / globalStats.totalCount : 0}
@@ -469,57 +477,108 @@ export function App() {
                 )}
                 {hasNodes && (
                   <div className="lg:hidden">
-                    <RegionFilter
-                      regions={regions.list}
-                      total={regions.total}
-                      active={activeRegion}
-                      onChange={setActiveRegion}
-                      layout="vertical"
-                    />
-                  </div>
-                )}
-                {hasNodes && <div className="lg:hidden"><TagFilter tags={allTags} active={activeTag} onChange={setActiveTag} /></div>}
-                {hasNodes && (
-                  <div className="lg:hidden">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs text-muted-foreground font-medium">状态筛选</span>
-                      {activeStatus && (
-                        <button type="button" onClick={() => setActiveStatus(null)} className="text-xs text-muted-foreground hover:text-foreground transition-colors">清除</button>
+                    {/* 移动端把地区/标签/状态三组筛选收进一个可折叠面板：
+                        地区 chip 常有 10+ 个，平铺会把卡片挤到首屏之外。 */}
+                    <button
+                      type="button"
+                      onClick={() => setMobileFiltersOpen(o => !o)}
+                      className="flex items-center justify-between w-full text-xs text-muted-foreground font-medium hover:text-foreground transition-colors group"
+                      aria-expanded={mobileFiltersOpen}
+                    >
+                      <span className="flex items-center gap-2">
+                        <SlidersHorizontal className="h-3.5 w-3.5" />
+                        <span>筛选</span>
+                        {activeFilterCount > 0 && (
+                          <span className="rounded-full bg-primary/15 text-primary px-1.5 py-0.5 text-[10px] font-semibold leading-none tabular-nums">
+                            {activeFilterCount}
+                          </span>
+                        )}
+                      </span>
+                      <ChevronDown
+                        className={cn(
+                          'h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-foreground transition-transform duration-200',
+                          mobileFiltersOpen ? 'rotate-0' : '-rotate-90',
+                        )}
+                      />
+                    </button>
+
+                    <div
+                      className={cn(
+                        'grid transition-[grid-template-rows,opacity,margin] duration-200 ease-in-out',
+                        mobileFiltersOpen
+                          ? 'grid-rows-[1fr] opacity-100 mt-3'
+                          : 'grid-rows-[0fr] opacity-0 pointer-events-none mt-0',
                       )}
-                    </div>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {([
-                        { key: 'normal' as const, label: '正常', dot: 'bg-emerald-500' },
-                        { key: 'warning' as const, label: '注意', dot: 'bg-amber-500' },
-                        { key: 'risk' as const, label: '风险', dot: 'bg-rose-500' },
-                        { key: 'offline' as const, label: '离线', dot: 'bg-gray-400' },
-                      ]).map(({ key, label, dot }) => (
-                        <button
-                          key={key}
-                          type="button"
-                          onClick={() => setActiveStatus(activeStatus === key ? null : key)}
-                          className={cn(
-                            'flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border border-transparent transition-all duration-200 w-full',
-                            activeStatus === key
-                              ? 'bg-primary text-primary-foreground shadow-sm'
-                              : 'bg-secondary/40 text-foreground/80 hover:bg-secondary/80'
+                    >
+                      <div className="overflow-hidden">
+                        <div className="flex flex-col gap-4">
+                          {regions.list.length > 0 && (
+                            <div>
+                              <div className="text-[11px] text-muted-foreground font-medium mb-2">地区</div>
+                              <RegionFilter
+                                regions={regions.list}
+                                total={regions.total}
+                                active={activeRegion}
+                                onChange={setActiveRegion}
+                                layout="vertical"
+                              />
+                            </div>
                           )}
-                        >
-                          <span className={cn("w-2 h-2 rounded-full shrink-0", activeStatus === key ? 'bg-white/80' : dot)} />
-                          <span>{label}</span>
-                          <span className="text-[10px] font-bold opacity-70 ml-auto">{filteredStatusCounts[key]}</span>
-                        </button>
-                      ))}
+
+                          {allTags.length > 0 && (
+                            <div>
+                              <div className="text-[11px] text-muted-foreground font-medium mb-2">标签</div>
+                              <TagFilter tags={allTags} active={activeTag} onChange={setActiveTag} />
+                            </div>
+                          )}
+
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-[11px] text-muted-foreground font-medium">状态</span>
+                              {activeStatus && (
+                                <button
+                                  type="button"
+                                  onClick={() => setActiveStatus(null)}
+                                  className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                                >
+                                  清除
+                                </button>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-2 gap-1.5">
+                              {([
+                                { key: 'normal' as const, label: '正常', dot: 'bg-emerald-500' },
+                                { key: 'warning' as const, label: '注意', dot: 'bg-amber-500' },
+                                { key: 'risk' as const, label: '风险', dot: 'bg-rose-500' },
+                                { key: 'offline' as const, label: '离线', dot: 'bg-gray-400' },
+                              ]).map(({ key, label, dot }) => (
+                                <button
+                                  key={key}
+                                  type="button"
+                                  onClick={() => setActiveStatus(activeStatus === key ? null : key)}
+                                  className={cn(
+                                    'flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border border-transparent transition-all duration-200 w-full',
+                                    activeStatus === key
+                                      ? 'bg-primary text-primary-foreground shadow-sm'
+                                      : 'bg-secondary/40 text-foreground/80 hover:bg-secondary/80'
+                                  )}
+                                >
+                                  <span className={cn("w-2 h-2 rounded-full shrink-0", activeStatus === key ? 'bg-white/80' : dot)} />
+                                  <span>{label}</span>
+                                  <span className="text-[10px] font-bold opacity-70 ml-auto tabular-nums">{filteredStatusCounts[key]}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )}
 
-                {showInitialLoading && (
-                  <div className="py-24 flex flex-col items-center gap-3 text-muted-foreground">
-                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                    <span className="text-sm">连接后端中…</span>
-                  </div>
-                )}
+                {showInitialLoading && <NodeCardSkeletonGrid count={6} />}
+
+                {hydrating && <NodeCardSkeletonGrid count={Math.min(nodes.size, 12)} />}
 
                 {showNoNodes && (
                   <div className="py-20 text-center text-muted-foreground">暂无节点</div>
@@ -538,7 +597,7 @@ export function App() {
                   </div>
                 )}
 
-                {hasResults && view === 'cards' && (
+                {hasResults && !hydrating && view === 'cards' && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {list.map(n => (
                       <NodeCard key={n.uuid} node={n} latencyTracks={latencyTracks.get(n.uuid)} status={stableStatuses.get(n.uuid)} counters={stableCounters.get(n.uuid)} />
