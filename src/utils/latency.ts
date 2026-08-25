@@ -145,7 +145,7 @@ function downsample(
 export function preprocessLatencyData(
   data: ChartPoint[],
   seriesNames: string[],
-  timeRange: '1h' | '6h' | '24h' | '7d',
+  timeRange: '1h' | '6h' | '24h',
 ): ChartPoint[] {
   // 1. 中值滤波消除瞬时尖刺
   let result = medianFilter(data, seriesNames)
@@ -156,8 +156,7 @@ export function preprocessLatencyData(
   }
 
   // 3. 根据时间范围降采样（大幅减少1小时视图的渲染点数）
-  const targetPoints =
-    timeRange === '1h' ? 60 : timeRange === '6h' ? 150 : timeRange === '24h' ? 300 : 400
+  const targetPoints = timeRange === '1h' ? 60 : timeRange === '6h' ? 150 : 300
   result = downsample(result, seriesNames, targetPoints)
 
   return result

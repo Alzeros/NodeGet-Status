@@ -1,7 +1,14 @@
 import prettyBytes from 'pretty-bytes'
 
+/** 1–10 TiB 区间用 4 位有效数字（如 1.234 TiB），避免整数截断看不出日增长 */
+function formatBytes(n: number) {
+  const t = 1024 ** 4
+  if (n >= t && n < 10 * t) return `${(n / t).toPrecision(4)} TiB`
+  return prettyBytes(n, { binary: true })
+}
+
 export function bytes(n?: number | null) {
-  return n && n > 0 ? prettyBytes(n, {binary:true}) : '0 B'
+  return n && n > 0 ? formatBytes(n) : '0 B'
 }
 
 export function bytesParts(n?: number | null): { num: string; unit: string } {

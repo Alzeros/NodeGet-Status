@@ -219,7 +219,7 @@ export function NodeDetail({ node, onClose, showSource, pool }: Props) {
           <div className="flex items-center gap-3 flex-wrap">
             <div className="flex items-center gap-2">
               <span className="text-xs text-muted-foreground">时间范围:</span>
-              {(['1h', '6h', '24h', '7d'] as LatencyTimeRange[]).map(range => (
+              {(['1h', '6h', '24h'] as LatencyTimeRange[]).map(range => (
                 <button
                   key={range}
                   onClick={() => setTimeRange(range)}
@@ -230,7 +230,7 @@ export function NodeDetail({ node, onClose, showSource, pool }: Props) {
                       : 'bg-muted text-muted-foreground hover:bg-muted/80',
                   )}
                 >
-                  {range === '1h' ? '1小时' : range === '6h' ? '6小时' : range === '24h' ? '24小时' : '7天'}
+                  {range === '1h' ? '1小时' : range === '6h' ? '6小时' : '24小时'}
                 </button>
               ))}
             </div>
@@ -266,7 +266,7 @@ export function NodeDetail({ node, onClose, showSource, pool }: Props) {
               <span className="text-sm font-medium">TCP Ping</span>
               {tcpExpanded && (
                 <span className="text-xs text-muted-foreground">
-                  {timeRange === '1h' ? '近 1 小时' : timeRange === '6h' ? '近 6 小时' : timeRange === '24h' ? '近 24 小时' : '近 7 天'}
+                  {timeRange === '1h' ? '近 1 小时' : timeRange === '6h' ? '近 6 小时' : '近 24 小时'}
                 </span>
               )}
             </div>
@@ -278,7 +278,7 @@ export function NodeDetail({ node, onClose, showSource, pool }: Props) {
                 rows={tcpData}
                 type="tcp_ping"
                 loading={latencyLoading}
-                timeRangeLabel={timeRange === '1h' ? '近 1 小时' : timeRange === '6h' ? '近 6 小时' : timeRange === '24h' ? '近 24 小时' : '近 7 天'}
+                timeRangeLabel={timeRange === '1h' ? '近 1 小时' : timeRange === '6h' ? '近 6 小时' : '近 24 小时'}
                 timeRange={timeRange}
                 smoothCurve={smoothCurve}
               />
@@ -296,7 +296,7 @@ export function NodeDetail({ node, onClose, showSource, pool }: Props) {
               <span className="text-sm font-medium">Ping</span>
               {pingExpanded && (
                 <span className="text-xs text-muted-foreground">
-                  {timeRange === '1h' ? '近 1 小时' : timeRange === '6h' ? '近 6 小时' : timeRange === '24h' ? '近 24 小时' : '近 7 天'}
+                  {timeRange === '1h' ? '近 1 小时' : timeRange === '6h' ? '近 6 小时' : '近 24 小时'}
                 </span>
               )}
             </div>
@@ -308,7 +308,7 @@ export function NodeDetail({ node, onClose, showSource, pool }: Props) {
                 rows={pingData}
                 type="ping"
                 loading={latencyLoading}
-                timeRangeLabel={timeRange === '1h' ? '近 1 小时' : timeRange === '6h' ? '近 6 小时' : timeRange === '24h' ? '近 24 小时' : '近 7 天'}
+                timeRangeLabel={timeRange === '1h' ? '近 1 小时' : timeRange === '6h' ? '近 6 小时' : '近 24 小时'}
                 timeRange={timeRange}
                 smoothCurve={smoothCurve}
               />
