@@ -12,6 +12,7 @@ export interface NodeMeta {
   priceCycle: number
   expireTime: string
   trafficLimit?: number
+  trafficResetDay: number
 }
 
 export interface StaticSystem {
@@ -91,7 +92,7 @@ export interface Node {
 }
 
 export interface MonthlyTraffic {
-  month: string
+  cycleId: string
   received: number
   transmitted: number
   lastReceived?: number

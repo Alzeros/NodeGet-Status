@@ -175,11 +175,11 @@ export function GlobalStats({
           )}
         </div>
 
-        {/* 本月流量 */}
+        {/* 周期流量 */}
         <div className="rounded-2xl p-4 overflow-hidden bg-card card-soft hover:translate-y-0">
           <div className="flex items-center gap-2 mb-2">
             <Database className="shrink-0 h-4 w-4 text-amber-500" strokeWidth={1.5} />
-            <span className="text-[11px] text-muted-foreground">本月流量</span>
+            <span className="text-[11px] text-muted-foreground">周期流量</span>
           </div>
           <div className="flex items-center justify-between px-4">
             <div className="flex items-baseline gap-0.5">
@@ -279,12 +279,12 @@ export function GlobalStats({
         </div>
       </div>
 
-      {/* 本月流量 */}
+      {/* 周期流量 */}
       <div className="flex items-center gap-3 md:gap-4 px-4 md:p-5 py-3 min-h-[48px] md:min-h-0 border-b border-border/10 md:border-b-0 last:border-b-0 md:rounded-2xl md:bg-card md:card-soft hover:translate-y-0 overflow-hidden">
         <Database className="shrink-0 h-4 w-4 text-amber-500" strokeWidth={1.5} />
         <div className="flex-1 min-w-0 flex flex-row md:flex-col justify-between md:justify-center items-center md:items-start gap-0 md:gap-1">
           <div className="text-sm md:text-[11px] text-muted-foreground md:leading-none md:h-[14px] md:flex md:items-center md:overflow-hidden">
-            本月流量
+            周期流量
           </div>
           <div className="shrink-0 h-auto md:h-6 flex items-center gap-1.5 leading-none md:whitespace-nowrap md:overflow-hidden">
             <Num className="text-base md:text-xl font-bold text-foreground">{trafficParts.num}</Num>

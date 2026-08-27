@@ -69,7 +69,7 @@ export const NodeCard = memo<NodeCardProps>(function NodeCard({ node, latencyTra
   const trafficDetail = trafficLimit
     ? `${bytes(totalTraffic)} / ${bytes(trafficLimit)}`
     : monthlyTraffic
-      ? `本月: ${bytes(totalTraffic)}`
+      ? `周期: ${bytes(totalTraffic)}`
       : '等待定时采样'
 
   const resourceMetrics: ResourceMetricItem[] = [
@@ -99,7 +99,7 @@ export const NodeCard = memo<NodeCardProps>(function NodeCard({ node, latencyTra
     },
     {
       id: 'traffic',
-      label: '本月流量',
+      label: '周期流量',
       valueNode: (
         <span title={trafficDetail}>
           <span className="text-emerald-500 font-sans">↑ {bytes(trafficOut)}</span>
@@ -110,7 +110,7 @@ export const NodeCard = memo<NodeCardProps>(function NodeCard({ node, latencyTra
       percent: trafficPercent,
       barClassName: loadColor(trafficPercent),
       detail: totalTraffic > 0 || trafficLimit || !monthlyTraffic ? trafficDetail : null,
-      detailTitle: trafficLimit ? `本月流量上限: ${bytes(trafficLimit)}` : undefined,
+      detailTitle: trafficLimit ? `周期流量上限: ${bytes(trafficLimit)}` : undefined,
     },
 
   ]

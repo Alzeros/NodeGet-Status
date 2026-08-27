@@ -4,6 +4,7 @@ import { dynamicSummaryMulti, kvGetMulti, listAgentUuids, staticDataMulti, taskQ
 import { buildLatencyTracks } from '../utils/latency'
 import type { LatencyTracks } from '../utils/latency'
 import { isOnline } from '../utils/status'
+import { clampResetDay, currentCycleId } from '../utils/trafficCycle'
 import type { DynamicSummary, HistorySample, MonthlyTraffic, Node, NodeMeta, SiteConfig } from '../types'
 
 type Agent = Pick<Node, 'uuid' | 'source' | 'meta' | 'static'>
@@ -52,15 +53,16 @@ const META_KEYS = [
   'metadata_price_cycle',
   'metadata_expire_time',
   'metadata_traffic_limit',
+  'metadata_traffic_reset_day',
 ]
 const DYN_INTERVAL_MS = 2000
 const LATENCY_INTERVAL_MS = 30_000
 const LATENCY_QUERY_TIMEOUT = 10_000
 const HISTORY_LIMIT = 60
-const MONTHLY_TRAFFIC_KEY_PREFIX = 'metadata_monthly_traffic:'
+const TRAFFIC_CYCLE_KEY_PREFIX = 'metadata_traffic_cycle:'
 
 interface MonthlyTrafficRecord {
-  month: string
+  cycleId: string
   received: number
   transmitted: number
   lastReceived?: number
@@ -83,6 +85,7 @@ function emptyMeta(): NodeMeta {
     priceUnit: '$',
     priceCycle: 30,
     expireTime: '',
+    trafficResetDay: 1,
   }
 }
 
@@ -94,23 +97,18 @@ function monthlyTrafficMapKey(source: string, uuid: string) {
   return `${source}:${uuid}`
 }
 
-function currentMonth() {
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+function trafficCycleKvKey(cycleId: string) {
+  return `${TRAFFIC_CYCLE_KEY_PREFIX}${cycleId}`
 }
 
-function monthlyTrafficKvKey(month: string) {
-  return `${MONTHLY_TRAFFIC_KEY_PREFIX}${month}`
-}
-
-function parseMonthlyTrafficRecord(raw: unknown, month: string): MonthlyTrafficRecord | null {
+function parseMonthlyTrafficRecord(raw: unknown, cycleId: string): MonthlyTrafficRecord | null {
   try {
     const value = typeof raw === 'string' ? JSON.parse(raw) : raw
     if (!value || typeof value !== 'object') return null
     const record = value as Partial<MonthlyTrafficRecord>
-    if (record.month !== month) return null
+    if (record.cycleId !== cycleId) return null
     return {
-      month,
+      cycleId,
       received: Number(record.received) || 0,
       transmitted: Number(record.transmitted) || 0,
       lastReceived: Number.isFinite(record.lastReceived) ? Number(record.lastReceived) : undefined,
@@ -131,7 +129,7 @@ function toMonthlyTraffic(record: MonthlyTrafficRecord): MonthlyTraffic {
   const received = validTotal(record.received) ?? 0
   const transmitted = validTotal(record.transmitted) ?? 0
   return {
-    month: record.month,
+    cycleId: record.cycleId,
     received,
     transmitted,
     lastReceived: record.lastReceived,
@@ -144,7 +142,8 @@ function toMonthlyTraffic(record: MonthlyTrafficRecord): MonthlyTraffic {
 
 function trafficDelta(current: number | undefined, previous: number | undefined) {
   if (current == null || previous == null) return 0
-  return current >= previous ? current - previous : current
+  // 计数器回退（重启/网卡重置）：丢弃这段间隙，避免把重启前后的用量叠加虚高。
+  return current >= previous ? current - previous : 0
 }
 
 function previewMonthlyTraffic(record: MonthlyTraffic, row: DynamicSummary | null): MonthlyTraffic {
@@ -218,6 +217,7 @@ function parseMeta(raw: Record<string, unknown>): NodeMeta {
     priceCycle: Number.isFinite(cycle) && cycle > 0 ? cycle : 30,
     expireTime: raw.metadata_expire_time ? String(raw.metadata_expire_time) : '',
     trafficLimit,
+    trafficResetDay: clampResetDay(Number(raw.metadata_traffic_reset_day)),
   }
 }
 
@@ -275,17 +275,24 @@ export function useNodes(config: SiteConfig | null) {
       entry: { name: string; client: BackendPool['entries'][number]['client'] },
       rows: DynamicSummary[],
     ) => {
-      const month = currentMonth()
-      const kvKey = monthlyTrafficKvKey(month)
+      const now = new Date()
+      const cycleByUuid = new Map<string, string>()
       const items = rows
         .filter(row => row.uuid)
-        .map(row => ({ namespace: row.uuid, key: kvKey }))
+        .map(row => {
+          const resetDay = agentsRef.current.get(row.uuid)?.meta?.trafficResetDay ?? 1
+          const cycleId = currentCycleId(resetDay, now)
+          cycleByUuid.set(row.uuid, cycleId)
+          return { namespace: row.uuid, key: trafficCycleKvKey(cycleId) }
+        })
       if (!items.length) return
 
       const records = await kvGetMulti(entry.client, items).catch(() => [])
       const updates = new Map<string, MonthlyTraffic>()
       for (const row of records) {
-        const record = parseMonthlyTrafficRecord(row.value, month)
+        const cycleId = cycleByUuid.get(row.namespace)
+        if (!cycleId) continue
+        const record = parseMonthlyTrafficRecord(row.value, cycleId)
         if (!record) continue
         updates.set(monthlyTrafficMapKey(entry.name, row.namespace), toMonthlyTraffic(record))
       }

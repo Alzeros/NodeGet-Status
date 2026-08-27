@@ -44,7 +44,7 @@ export const NodeTable = memo<Props>(function NodeTable({ nodes, onOpen, statuse
             <TableHead>CPU</TableHead>
             <TableHead>内存</TableHead>
             <TableHead>磁盘</TableHead>
-            <TableHead>本月流量</TableHead>
+            <TableHead>周期流量</TableHead>
             <TableHead>下行</TableHead>
             <TableHead>上行</TableHead>
             <TableHead>更新</TableHead>

@@ -19,6 +19,7 @@ import { StatusDot } from './StatusDot'
 import { bytes, pct, relativeAge, uptime } from '../utils/format'
 import { deriveUsage, displayName, distroLogo, osLabel, virtLabel } from '../utils/derive'
 import { cycleProgress, hasCost, remainingDays, remainingValue } from '../utils/cost'
+import { currentCycleId, nextCycleStartId } from '../utils/trafficCycle'
 import { cn, strokeColor } from '../utils/cn'
 import {
   buildLatencyChart,
@@ -101,6 +102,8 @@ export function NodeDetail({ node, onClose, showSource, pool }: Props) {
   const monthlyTraffic = node.monthlyTraffic
   const monthlyTrafficLimit = monthlyTraffic?.limit
   const monthlyTrafficPercent = monthlyTraffic?.percent
+  const trafficResetDay = node.meta?.trafficResetDay ?? 1
+  const cycleRangeLabel = `${mmdd(currentCycleId(trafficResetDay))} ~ ${mmdd(nextCycleStartId(trafficResetDay))}`
   const monthlyTrafficBar =
     monthlyTrafficPercent == null
       ? 'bg-muted-foreground/40'
@@ -337,8 +340,9 @@ export function NodeDetail({ node, onClose, showSource, pool }: Props) {
           </Section>
 
           <Section title="网络与负载">
+            <KV k="统计周期" v={monthlyTraffic ? cycleRangeLabel : null} />
             <KV
-              k="本月流量"
+              k="周期流量"
               v={
                 monthlyTraffic
                   ? monthlyTrafficLimit
@@ -347,10 +351,10 @@ export function NodeDetail({ node, onClose, showSource, pool }: Props) {
                   : null
               }
             />
-            <KV k="本月接收" v={monthlyTraffic ? bytes(monthlyTraffic.received) : null} />
-            <KV k="本月发送" v={monthlyTraffic ? bytes(monthlyTraffic.transmitted) : null} />
+            <KV k="周期接收" v={monthlyTraffic ? bytes(monthlyTraffic.received) : null} />
+            <KV k="周期发送" v={monthlyTraffic ? bytes(monthlyTraffic.transmitted) : null} />
             <KV
-              k="本月占比"
+              k="周期占比"
               v={monthlyTrafficPercent != null ? pct(monthlyTrafficPercent) : null}
             />
             {monthlyTrafficPercent != null && (
@@ -504,6 +508,11 @@ interface LatencyBlockProps {
 }
 
 const ms = (v: number) => `${v.toFixed(1)} ms`
+
+function mmdd(isoDate: string) {
+  const [, m, d] = isoDate.split('-')
+  return `${m}-${d}`
+}
 
 function LatencyBlock({ timeRangeLabel, timeRange, rows, type, loading, smoothCurve }: LatencyBlockProps) {
   const raw = useMemo(() => buildLatencyChart(rows, type), [rows, type])

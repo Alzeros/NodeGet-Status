@@ -9,16 +9,50 @@
  */
 
 const DEFAULT_TOKEN = ''
-const MONTHLY_TRAFFIC_KEY_PREFIX = 'metadata_monthly_traffic:'
+const TRAFFIC_CYCLE_KEY_PREFIX = 'metadata_traffic_cycle:'
+const RESET_DAY_KEY = 'metadata_traffic_reset_day'
 const DYNAMIC_FIELDS = ['total_received', 'total_transmitted']
 
-function currentMonth() {
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+// 流量统计周期：按每台服务器自己的"重置日"（每月几号）切片，而不是日历月。
+// 商家的流量重置日通常对齐账单日/购买日，未必是每月 1 号。
+function daysInMonth(year, monthIndex0) {
+  return new Date(year, monthIndex0 + 1, 0).getDate()
 }
 
-function monthlyTrafficKvKey(month) {
-  return `${MONTHLY_TRAFFIC_KEY_PREFIX}${month}`
+function clampDay(year, monthIndex0, day) {
+  return Math.min(day, daysInMonth(year, monthIndex0))
+}
+
+function pad(n) {
+  return String(n).padStart(2, '0')
+}
+
+function fmt(year, monthIndex0, day) {
+  return `${year}-${pad(monthIndex0 + 1)}-${pad(day)}`
+}
+
+function clampResetDay(day) {
+  const d = Math.trunc(Number(day))
+  return Number.isFinite(d) && d >= 1 && d <= 31 ? d : 1
+}
+
+function currentCycleId(resetDay, now) {
+  const rd = clampResetDay(resetDay)
+  const year = now.getFullYear()
+  const monthIndex0 = now.getMonth()
+  const day = now.getDate()
+  const thisMonthReset = clampDay(year, monthIndex0, rd)
+
+  if (day >= thisMonthReset) {
+    return fmt(year, monthIndex0, thisMonthReset)
+  }
+  const prevMonthIndex0 = monthIndex0 === 0 ? 11 : monthIndex0 - 1
+  const prevYear = monthIndex0 === 0 ? year - 1 : year
+  return fmt(prevYear, prevMonthIndex0, clampDay(prevYear, prevMonthIndex0, rd))
+}
+
+function trafficCycleKvKey(cycleId) {
+  return `${TRAFFIC_CYCLE_KEY_PREFIX}${cycleId}`
 }
 
 function validTotal(value) {
@@ -27,15 +61,16 @@ function validTotal(value) {
 
 function trafficDelta(current, previous) {
   if (current == null || previous == null) return 0
-  return current >= previous ? current - previous : current
+  // 计数器回退（重启/网卡重置）：丢弃这段间隙，避免把重启前后的用量叠加虚高。
+  return current >= previous ? current - previous : 0
 }
 
-function parseRecord(raw, month) {
+function parseRecord(raw, cycleId) {
   try {
     const value = typeof raw === 'string' ? JSON.parse(raw) : raw
-    if (!value || typeof value !== 'object' || value.month !== month) return null
+    if (!value || typeof value !== 'object' || value.cycleId !== cycleId) return null
     return {
-      month,
+      cycleId,
       received: Number(value.received) || 0,
       transmitted: Number(value.transmitted) || 0,
       lastReceived: Number.isFinite(value.lastReceived) ? Number(value.lastReceived) : undefined,
@@ -48,9 +83,9 @@ function parseRecord(raw, month) {
   }
 }
 
-function createRecord(row, month, now) {
+function createRecord(row, cycleId, now) {
   return {
-    month,
+    cycleId,
     received: 0,
     transmitted: 0,
     lastReceived: validTotal(row.total_received),
@@ -137,28 +172,38 @@ async function debugProbeWithToken(params = {}, env = {}) {
 
 async function syncMonthlyTraffic(params = {}, env = {}) {
   const token = resolveToken(params, env)
-  const month = currentMonth()
-  const kvKey = monthlyTrafficKvKey(month)
   const now = Date.now()
+  const nowDate = new Date(now)
 
   const uuidResult = await call('nodeget-server_list_all_agent_uuid', {}, token)
   const uuids = uuidResult?.uuids || []
   if (!uuids.length) {
-    return { month, updated: 0, total: 0 }
+    return { updated: 0, total: 0 }
   }
 
-  const rows = await call('agent_dynamic_summary_multi_last_query', {
-    uuids,
-    fields: DYNAMIC_FIELDS,
-  }, token)
+  const [rows, resetDayRows] = await Promise.all([
+    call('agent_dynamic_summary_multi_last_query', { uuids, fields: DYNAMIC_FIELDS }, token),
+    call('kv_get_multi_value', {
+      namespace_key: uuids.map(uuid => ({ namespace: uuid, key: RESET_DAY_KEY })),
+    }, token).catch(() => []),
+  ])
+
+  const resetDayByUuid = new Map()
+  for (const r of resetDayRows || []) {
+    if (r && r.namespace) resetDayByUuid.set(r.namespace, clampResetDay(r.value))
+  }
 
   let updated = 0
   for (const row of rows || []) {
     if (!row?.uuid) continue
     if (validTotal(row.total_received) == null && validTotal(row.total_transmitted) == null) continue
 
+    const resetDay = resetDayByUuid.get(row.uuid) ?? 1
+    const cycleId = currentCycleId(resetDay, nowDate)
+    const kvKey = trafficCycleKvKey(cycleId)
+
     const raw = await call('kv_get_value', { namespace: row.uuid, key: kvKey }, token).catch(() => null)
-    const current = parseRecord(raw, month) ?? createRecord(row, month, now)
+    const current = parseRecord(raw, cycleId) ?? createRecord(row, cycleId, now)
     const next = advanceRecord(current, row, now)
 
     await call('kv_set_value', {
@@ -169,7 +214,7 @@ async function syncMonthlyTraffic(params = {}, env = {}) {
     updated++
   }
 
-  return { month, updated, total: uuids.length }
+  return { updated, total: uuids.length }
 }
 
 export default {
