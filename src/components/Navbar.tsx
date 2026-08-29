@@ -5,7 +5,7 @@ import { ViewToggle } from './ViewToggle'
 import { ThemeToggle } from './ThemeToggle'
 import { SortMenu } from './SortMenu'
 import { Button } from './ui/button'
-import type { Sort, View } from '../types'
+import type { Sort, SortDir, View } from '../types'
 
 interface Props {
   siteName: string
@@ -15,10 +15,11 @@ interface Props {
   view: View
   onView: (v: View) => void
   sort: Sort
-  onSort: (v: Sort) => void
+  sortDir: SortDir
+  onSort: (v: Sort, d: SortDir) => void
 }
 
-export function Navbar({ siteName, logo, query, onQuery, view, onView, sort, onSort }: Props) {
+export function Navbar({ siteName, logo, query, onQuery, view, onView, sort, sortDir, onSort }: Props) {
   const [searchOpen, setSearchOpen] = useState(false)
   const [stuck, setStuck] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -68,7 +69,7 @@ export function Navbar({ siteName, logo, query, onQuery, view, onView, sort, onS
           >
             {searchOpen ? <X className="h-4 w-4" /> : <SearchIcon className="h-4 w-4" />}
           </Button>
-          <SortMenu value={sort} onChange={onSort} />
+          <SortMenu value={sort} dir={sortDir} onChange={onSort} />
           <ViewToggle value={view} onChange={onView} />
           <ThemeToggle />
         </div>

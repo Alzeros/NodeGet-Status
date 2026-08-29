@@ -25,12 +25,14 @@ import { useMediaQuery } from './hooks/useMediaQuery'
 import { deriveUsage, displayName } from './utils/derive'
 import { avgLatency } from './utils/latency'
 import { remainingDays } from './utils/cost'
-import type { Sort, View } from './types'
+import { SORT_NATURAL_DIR } from './components/SortMenu'
+import type { Sort, SortDir, View } from './types'
 import type { NodeStatusCategory } from './utils/stableStatus'
 
 const DEFAULT_LOGO = `${import.meta.env.BASE_URL}logo.png`
 const VIEW_KEY = 'nodeget.view'
 const SORT_KEY = 'nodeget.sort'
+const SORT_DIR_KEY = 'nodeget.sortDir'
 
 function initialView(): View {
   const v = localStorage.getItem(VIEW_KEY)
@@ -39,14 +41,27 @@ function initialView(): View {
 }
 
 function initialSort(): Sort {
-  return (localStorage.getItem(SORT_KEY) as Sort) || 'default'
+  const v = localStorage.getItem(SORT_KEY)
+  return v && v in SORT_NATURAL_DIR ? (v as Sort) : 'default'
+}
+
+function initialSortDir(): SortDir {
+  const v = localStorage.getItem(SORT_DIR_KEY)
+  if (v === 'asc' || v === 'desc') return v
+  return SORT_NATURAL_DIR[initialSort()]
 }
 
 function readHash() {
   return decodeURIComponent(window.location.hash.slice(1)) || null
 }
 
-const num = (v?: number) => (Number.isFinite(v) ? (v as number) : -Infinity)
+// 缺值节点无论升降序都沉底：升序看延迟时，没开监控的机器不该霸占榜首
+function cmpNum(va: number | null | undefined, vb: number | null | undefined, asc: boolean) {
+  const fa = va != null && Number.isFinite(va)
+  const fb = vb != null && Number.isFinite(vb)
+  if (!fa || !fb) return fa === fb ? 0 : fa ? -1 : 1
+  return asc ? (va as number) - (vb as number) : (vb as number) - (va as number)
+}
 
 // 异常优先排序的严重度：告警类排在离线前——它们还活着、需要人马上处理
 const SEVERITY: Record<NodeStatusCategory, number> = { normal: 0, offline: 1, warning: 2, risk: 3 }
@@ -119,6 +134,7 @@ export function App() {
 
   const [view, setView] = useState<View>(initialView)
   const [sort, setSort] = useState<Sort>(initialSort)
+  const [sortDir, setSortDir] = useState<SortDir>(initialSortDir)
   const [query, setQuery] = useState('')
   const [activeTag, setActiveTag] = useState<string | null>(null)
   const [activeRegion, setActiveRegion] = useState<string | null>(null)
@@ -145,6 +161,10 @@ export function App() {
   useEffect(() => {
     localStorage.setItem(SORT_KEY, sort)
   }, [sort])
+
+  useEffect(() => {
+    localStorage.setItem(SORT_DIR_KEY, sortDir)
+  }, [sortDir])
 
   useEffect(() => {
     if (selected && !consoleEmbedded) {
@@ -242,48 +262,48 @@ export function App() {
         ? new Map(arr.map(n => [n.uuid, remainingDays(n.meta?.expireTime ?? '')]))
         : null
 
+    const asc = sortDir === 'asc'
+
     return arr.sort((a, b) => {
-      // "异常优先"是唯一让离线浮上来的排序：其余排序沿用离线沉底
+      // "异常优先"是唯一让离线浮上来的排序：其余排序沿用离线沉底（与方向无关）
       if (sort !== 'status' && a.online !== b.online) return a.online ? -1 : 1
 
       const ua = deriveUsage(a)
       const ub = deriveUsage(b)
       let cmp = 0
-      if (sort === 'cpu') cmp = num(ub.cpu) - num(ua.cpu)
-      else if (sort === 'mem') cmp = num(ub.mem) - num(ua.mem)
-      else if (sort === 'disk') cmp = num(ub.disk) - num(ua.disk)
-      else if (sort === 'netIn') cmp = num(ub.netIn) - num(ua.netIn)
-      else if (sort === 'netOut') cmp = num(ub.netOut) - num(ua.netOut)
-      else if (sort === 'uptime') cmp = num(ub.uptime) - num(ua.uptime)
-      else if (sort === 'traffic') cmp = num(b.monthlyTraffic?.total) - num(a.monthlyTraffic?.total)
+      if (sort === 'cpu') cmp = cmpNum(ua.cpu, ub.cpu, asc)
+      else if (sort === 'mem') cmp = cmpNum(ua.mem, ub.mem, asc)
+      else if (sort === 'disk') cmp = cmpNum(ua.disk, ub.disk, asc)
+      else if (sort === 'netIn') cmp = cmpNum(ua.netIn, ub.netIn, asc)
+      else if (sort === 'netOut') cmp = cmpNum(ua.netOut, ub.netOut, asc)
+      else if (sort === 'uptime') cmp = cmpNum(ua.uptime, ub.uptime, asc)
+      else if (sort === 'traffic') cmp = cmpNum(a.monthlyTraffic?.total, b.monthlyTraffic?.total, asc)
       else if (sort === 'trafficPct')
-        cmp = num(b.monthlyTraffic?.percent) - num(a.monthlyTraffic?.percent)
+        cmp = cmpNum(a.monthlyTraffic?.percent, b.monthlyTraffic?.percent, asc)
       else if (sort === 'status') {
-        cmp =
-          SEVERITY[stableStatuses.get(b.uuid) ?? 'normal'] -
-          SEVERITY[stableStatuses.get(a.uuid) ?? 'normal']
+        const sa = SEVERITY[stableStatuses.get(a.uuid) ?? 'normal']
+        const sb = SEVERITY[stableStatuses.get(b.uuid) ?? 'normal']
+        cmp = asc ? sa - sb : sb - sa
       }
-      else if (sort === 'latency') {
-        // 差的在前，和其他"压力大在前"的排序保持同一方向；没开监控的沉底
-        cmp = num(latencyOf!.get(b.uuid) ?? undefined) - num(latencyOf!.get(a.uuid) ?? undefined)
-      }
-      else if (sort === 'expire') {
-        // 已过期(负数)/快到期在前，没设置到期时间的沉底
-        const da = daysOf!.get(a.uuid) ?? Infinity
-        const db = daysOf!.get(b.uuid) ?? Infinity
-        cmp = da - db
-      }
+      else if (sort === 'latency') cmp = cmpNum(latencyOf!.get(a.uuid), latencyOf!.get(b.uuid), asc)
+      else if (sort === 'expire') cmp = cmpNum(daysOf!.get(a.uuid), daysOf!.get(b.uuid), asc)
       else if (sort === 'region') {
-        const ar = rank.get(a.meta?.region?.trim().toUpperCase() || '') ?? Infinity
-        const br = rank.get(b.meta?.region?.trim().toUpperCase() || '') ?? Infinity
-        cmp = ar - br
+        const ar = rank.get(a.meta?.region?.trim().toUpperCase() || '')
+        const br = rank.get(b.meta?.region?.trim().toUpperCase() || '')
+        cmp = cmpNum(ar, br, asc)
       }
-      else if (sort === 'default') cmp = (a.meta?.order ?? 0) - (b.meta?.order ?? 0)
+      else if (sort === 'name') {
+        cmp = displayName(a).localeCompare(displayName(b))
+        if (!asc) cmp = -cmp
+      }
+      else if (sort === 'default') {
+        cmp = (a.meta?.order ?? 0) - (b.meta?.order ?? 0)
+        if (!asc) cmp = -cmp
+      }
 
-      // 两边都无值时 ±Infinity 相减得 NaN，NaN 为假值，正好落到名称排序
       return cmp || displayName(a).localeCompare(displayName(b))
     })
-  }, [nodes, query, activeTag, activeRegion, activeStatus, sort, regions, stableStatuses, latencyTracks])
+  }, [nodes, query, activeTag, activeRegion, activeStatus, sort, sortDir, regions, stableStatuses, latencyTracks])
 
   const filteredStatusCounts = useMemo(() => {
     let arr = [...nodes.values()].filter(n => !n.meta?.hidden)
@@ -371,7 +391,11 @@ export function App() {
         view={view}
         onView={changeView}
         sort={sort}
-        onSort={setSort}
+        sortDir={sortDir}
+        onSort={(v, d) => {
+          setSort(v)
+          setSortDir(d)
+        }}
       />
 
       <main className="flex-1 w-full max-w-[1600px] mx-auto px-6 sm:px-8 lg:px-12 xl:px-16 py-6 sm:py-8">

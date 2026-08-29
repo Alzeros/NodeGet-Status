@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUpDown, Check } from 'lucide-react'
+import { ArrowDown, ArrowUp } from 'lucide-react'
 import { Button } from './ui/button'
-import type { Sort } from '../types'
+import type { Sort, SortDir } from '../types'
 
 const OPTIONS: { value: Sort; label: string }[] = [
   { value: 'default', label: '默认' },
@@ -20,11 +20,38 @@ const OPTIONS: { value: Sort; label: string }[] = [
   { value: 'expire', label: '到期时间' },
 ]
 
-export function SortMenu({ value, onChange }: { value: Sort; onChange: (v: Sort) => void }) {
+/** 每个排序项首次选中时的自然方向：数值类"压力大在前"是降序，身份/到期类是升序 */
+export const SORT_NATURAL_DIR: Record<Sort, SortDir> = {
+  default: 'asc',
+  name: 'asc',
+  region: 'asc',
+  status: 'desc',
+  latency: 'desc',
+  cpu: 'desc',
+  mem: 'desc',
+  disk: 'desc',
+  netIn: 'desc',
+  netOut: 'desc',
+  uptime: 'desc',
+  traffic: 'desc',
+  trafficPct: 'desc',
+  expire: 'asc',
+}
+
+export function SortMenu({
+  value,
+  dir,
+  onChange,
+}: {
+  value: Sort
+  dir: SortDir
+  onChange: (v: Sort, d: SortDir) => void
+}) {
   const [open, setOpen] = useState(false)
   const [show, setShow] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const current = OPTIONS.find(o => o.value === value) ?? OPTIONS[0]
+  const DirIcon = dir === 'asc' ? ArrowUp : ArrowDown
 
   useEffect(() => {
     if (open) setShow(true)
@@ -56,7 +83,7 @@ export function SortMenu({ value, onChange }: { value: Sort; onChange: (v: Sort)
         aria-expanded={open}
         className="gap-1.5"
       >
-        <ArrowUpDown className="h-3.5 w-3.5" />
+        <DirIcon className="h-3.5 w-3.5" />
         <span className="hidden sm:inline">{current.label}</span>
       </Button>
       {show && (
@@ -72,15 +99,20 @@ export function SortMenu({ value, onChange }: { value: Sort; onChange: (v: Sort)
               key={o.value}
               type="button"
               onClick={() => {
-                onChange(o.value)
+                // 点当前生效项 = 翻转方向；点新项 = 回到该项的自然方向
+                if (o.value === value) onChange(value, dir === 'asc' ? 'desc' : 'asc')
+                else onChange(o.value, SORT_NATURAL_DIR[o.value])
                 setOpen(false)
               }}
               className="w-full flex items-center justify-between px-2.5 py-1.5 text-sm hover:bg-accent"
             >
               <span>{o.label}</span>
-              {o.value === value && <Check className="h-3.5 w-3.5" />}
+              {o.value === value && <DirIcon className="h-3.5 w-3.5" />}
             </button>
           ))}
+          <div className="mt-1 border-t border-border/60 px-2.5 pt-1.5 text-[10px] text-muted-foreground">
+            再点一次当前项可反向
+          </div>
         </div>
       )}
     </div>

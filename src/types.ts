@@ -161,6 +161,8 @@ export interface TaskQueryCondition {
 
 export type View = 'cards' | 'console' | 'mini' | 'table' | 'map'
 
+export type SortDir = 'asc' | 'desc'
+
 export type Sort =
   | 'default'
   | 'name'
