@@ -31,10 +31,12 @@ const STATUS_STYLE: Record<NodeStatusCategory, { color: string; period: number; 
 const OFFLINE_LIGHT = '#64748b'
 
 interface Palette {
-  land: string
-  landActive: string
-  border: string
+  /** 点阵大陆的点色 */
+  dot: string
   glow: number
+  /** 正常节点常驻标签的文字色（异常节点用状态色） */
+  labelMuted: string
+  labelBorder: string
   tooltipBg: string
   tooltipBorder: string
   tooltipText: string
@@ -42,19 +44,19 @@ interface Palette {
 
 const PALETTE: Record<'light' | 'dark', Palette> = {
   light: {
-    land: 'rgba(148,163,184,0.26)',
-    landActive: 'rgba(100,116,139,0.40)',
-    border: 'rgba(100,116,139,0.40)',
-    glow: 6,
+    dot: 'rgba(100,116,139,0.34)',
+    glow: 8,
+    labelMuted: '#5f6b7d',
+    labelBorder: 'rgba(255,255,255,0.94)',
     tooltipBg: 'rgba(255,255,255,0.97)',
     tooltipBorder: 'rgba(100,116,139,0.28)',
     tooltipText: '#1e293b',
   },
   dark: {
-    land: 'rgba(148,163,184,0.10)',
-    landActive: 'rgba(148,163,184,0.22)',
-    border: 'rgba(148,163,184,0.22)',
-    glow: 10,
+    dot: 'rgba(148,163,184,0.30)',
+    glow: 14,
+    labelMuted: '#aab4c8',
+    labelBorder: 'rgba(11,14,20,0.92)',
     tooltipBg: 'rgba(16,20,29,0.94)',
     tooltipBorder: 'rgba(148,163,184,0.3)',
     tooltipText: '#e5e7eb',
@@ -67,8 +69,21 @@ const SEVERITY: Record<NodeStatusCategory, number> = { normal: 0, offline: 1, wa
 
 const ORDER: NodeStatusCategory[] = ['normal', 'warning', 'risk', 'offline']
 
+// 常见机房地区的中文名：geojson 的 cname 是英文全称（"United States of America"），
+// 做聚合标签太长，也和整体中文界面不搭；不在表里的地区回退 cname/代码
+const REGION_CN: Record<string, string> = {
+  US: '美国', JP: '日本', HK: '香港', DE: '德国', AU: '澳大利亚', CN: '中国',
+  NL: '荷兰', SG: '新加坡', TW: '台湾', KR: '韩国', GB: '英国', FR: '法国',
+  CA: '加拿大', RU: '俄罗斯', IN: '印度', BR: '巴西', VN: '越南', TH: '泰国',
+  MY: '马来西亚', ID: '印尼', PH: '菲律宾', TR: '土耳其', IT: '意大利', ES: '西班牙',
+  PL: '波兰', SE: '瑞典', FI: '芬兰', NO: '挪威', CH: '瑞士', AT: '奥地利',
+  UA: '乌克兰', AE: '阿联酋', ZA: '南非', MX: '墨西哥', AR: '阿根廷', CL: '智利',
+}
+
 const cnameMap = new Map<string, string>()
 const centroid = new Map<string, [number, number]>()
+// 点阵大陆：由 geojson 现场采样生成，替代多边形填充（提案的"点阵世界地图"）
+let landDots: [number, number][] = []
 let mapPromise: Promise<void> | null = null
 
 interface Props {
@@ -121,6 +136,68 @@ function polyCenter(geometry: any): [number, number] | null {
   return [(best.minLng + best.maxLng) / 2, (best.minLat + best.maxLat) / 2]
 }
 
+interface LandPoly {
+  rings: number[][][]
+  minLng: number
+  maxLng: number
+  minLat: number
+  maxLat: number
+}
+
+/** 提取所有陆地多边形（含孔洞环），带外环包围盒做快速预筛 */
+function prepPolys(geo: any): LandPoly[] {
+  const polys: LandPoly[] = []
+  for (const f of geo.features ?? []) {
+    // 南极洲不进点阵：底部一整条冰盖会把视觉重心拽下去，节点也不会在那
+    if (f.properties?.name === 'AQ') continue
+    const g = f.geometry
+    if (!g?.coordinates) continue
+    const list = g.type === 'MultiPolygon' ? g.coordinates : g.type === 'Polygon' ? [g.coordinates] : []
+    for (const rings of list) {
+      const outer = rings[0]
+      if (!outer?.length) continue
+      const bb = ringBbox(outer)
+      polys.push({ rings, minLng: bb.minLng, maxLng: bb.maxLng, minLat: bb.minLat, maxLat: bb.maxLat })
+    }
+  }
+  return polys
+}
+
+function inRing(x: number, y: number, ring: number[][]) {
+  let inside = false
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0]
+    const yi = ring[i][1]
+    const xj = ring[j][0]
+    const yj = ring[j][1]
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside
+  }
+  return inside
+}
+
+/** 经纬网格采样陆地内部的点；奇偶规则天然处理孔洞（里海等） */
+function computeLandDots(polys: LandPoly[]): [number, number][] {
+  const dots: [number, number][] = []
+  const STEP = 1.35
+  let row = 0
+  for (let lat = -55.5; lat <= 83.5; lat += STEP, row++) {
+    // 隔行错位半格，比正交网格更接近提案示意的点阵质感
+    const off = row % 2 ? STEP / 2 : 0
+    for (let lng = -180 + off; lng <= 180; lng += STEP) {
+      for (const p of polys) {
+        if (lng < p.minLng || lng > p.maxLng || lat < p.minLat || lat > p.maxLat) continue
+        let inside = false
+        for (const ring of p.rings) if (inRing(lng, lat, ring)) inside = !inside
+        if (inside) {
+          dots.push([lng, lat])
+          break
+        }
+      }
+    }
+  }
+  return dots
+}
+
 function ensureMap() {
   if (!mapPromise) {
     mapPromise = fetch(GEO_URL)
@@ -134,6 +211,7 @@ function ensureMap() {
           if (c) centroid.set(a2, c)
         }
         echarts.registerMap('world', geo)
+        landDots = computeLandDots(prepPolys(geo))
       })
       .catch(err => {
         mapPromise = null
@@ -163,7 +241,7 @@ function clusterLabel(c: Cluster) {
   const regions = new Set(c.nodes.map(regionOf).filter(Boolean) as string[])
   if (regions.size === 1) {
     const a2 = [...regions][0]
-    return cnameMap.get(a2) || a2
+    return REGION_CN[a2] || cnameMap.get(a2) || a2
   }
   return `${c.nodes.length} 台节点`
 }
@@ -308,11 +386,33 @@ export function WorldMap({ nodes, statuses, latencyTracks, onOpen }: Props) {
   return (
     <Card className="p-3 sm:p-4">
       <div
-        className="relative w-full overflow-hidden rounded-md border border-border/60 bg-[hsl(210_20%_97%)] dark:bg-[hsl(220_15%_8%)]"
+        className="relative w-full overflow-hidden rounded-md border border-border/60 bg-[hsl(210_20%_97%)] dark:bg-[#0b0e14]"
         // 满幅后按固定比例会撑出一屏，限高让地图始终一眼看全；
         // geo 自己保持比例，多出来的横向空间留白即可
         style={{ aspectRatio: `${MAP_W} / ${MAP_H}`, maxHeight: 'calc(100vh - 200px)' }}
       >
+        {/* 网格 + 晕影底层，纯装饰：撑起"指挥室"的纵深感 */}
+        <div
+          aria-hidden
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            backgroundImage: `linear-gradient(${
+              isDark ? 'rgba(148,163,184,0.05)' : 'rgba(100,116,139,0.06)'
+            } 1px, transparent 1px), linear-gradient(90deg, ${
+              isDark ? 'rgba(148,163,184,0.05)' : 'rgba(100,116,139,0.06)'
+            } 1px, transparent 1px)`,
+            backgroundSize: '44px 44px',
+          }}
+        />
+        <div
+          aria-hidden
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background: isDark
+              ? 'radial-gradient(75% 65% at 50% 42%, rgba(59,97,153,0.09), transparent 65%), radial-gradient(120% 100% at 50% 45%, transparent 58%, rgba(0,2,6,0.45) 100%)'
+              : 'radial-gradient(120% 100% at 50% 45%, transparent 60%, rgba(15,23,42,0.07) 100%)',
+          }}
+        />
         <div ref={wrapRef} className="absolute inset-0" />
 
         {/* 聚合条 */}
@@ -364,6 +464,31 @@ export function WorldMap({ nodes, statuses, latencyTracks, onOpen }: Props) {
           </div>
         )}
 
+        {/* 状态图例：脉冲节奏本身就是含义（越急越严重），图例把这层语义讲明白 */}
+        {!error && ready && (
+          <div className="absolute bottom-3 left-3 z-10 pointer-events-none flex items-center gap-3 rounded-md border border-border/70 bg-card/85 px-2.5 py-1.5 backdrop-blur-sm">
+            {ORDER.map(s => {
+              const st = STATUS_STYLE[s]
+              const color = s === 'offline' && !isDark ? OFFLINE_LIGHT : st.color
+              return (
+                <span key={s} className="inline-flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                  <span className="relative inline-flex h-1.5 w-1.5" style={{ color }}>
+                    <span className="absolute inset-0 rounded-full bg-current" />
+                    {st.period > 0 && (
+                      <span
+                        className="absolute inset-0 rounded-full border border-current"
+                        style={{ animation: `ng-map-ping ${st.period}s cubic-bezier(0,0,0.2,1) infinite` }}
+                      />
+                    )}
+                  </span>
+                  {st.label}
+                </span>
+              )
+            })}
+          </div>
+        )}
+        <style>{`@keyframes ng-map-ping { 0% { transform: scale(1); opacity: .9 } 80%, 100% { transform: scale(3); opacity: 0 } }`}</style>
+
         {selected && (
           <Drawer
             cluster={selected}
@@ -393,58 +518,28 @@ function Chip({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
+// 标签避让按 series 顺序保留先来者：异常在前，重叠时牺牲正常节点的标签
+const LABEL_ORDER: NodeStatusCategory[] = ['risk', 'warning', 'offline', 'normal']
+
 function buildOption(
   clusters: Cluster[],
   liveRef: { current: { clusterMap: Map<string, Cluster> } },
   palette: Palette,
   isDark: boolean,
 ) {
-  const activeRegions = new Set<string>()
-  for (const c of clusters) {
-    for (const n of c.nodes) {
-      const a2 = regionOf(n)
-      if (a2) activeRegions.add(a2)
-    }
-  }
-
-  const series = ORDER.map(status => {
+  const nodeSeries = LABEL_ORDER.map(status => {
     const style = STATUS_STYLE[status]
     const color = status === 'offline' && !isDark ? OFFLINE_LIGHT : style.color
+    const abnormal = status !== 'normal'
     const items = clusters
       .filter(c => c.status === status)
       .map(c => {
         const n = c.nodes.length
-        // 出事的点常驻名字标签（提案如此）：告警不该藏在 hover 后面；
-        // 正常的多机气泡只标台数，保持安静
-        const label =
-          status !== 'normal'
-            ? {
-                show: true,
-                position: 'right' as const,
-                distance: 6,
-                formatter: n > 1 ? `${clusterLabel(c)} ×${n}` : clusterLabel(c),
-                fontSize: 10,
-                fontWeight: 600 as const,
-                color,
-                textBorderColor: isDark ? 'rgba(11,14,20,0.9)' : 'rgba(255,255,255,0.95)',
-                textBorderWidth: 2,
-              }
-            : n > 1
-              ? {
-                  show: true,
-                  formatter: String(n),
-                  position: 'inside' as const,
-                  fontSize: 10,
-                  fontWeight: 600 as const,
-                  color: '#0b0e14',
-                }
-              : { show: false }
         return {
           name: clusterLabel(c),
           key: c.key,
           value: [c.lng, c.lat, n],
-          symbolSize: n > 1 ? Math.min(28, 9 + Math.log2(n) * 4.5) : 9,
-          label,
+          symbolSize: n > 1 ? Math.min(30, 10 + Math.log2(n) * 4.5) : 10,
         }
       })
 
@@ -452,13 +547,27 @@ function buildOption(
       // 离线是"已经停了"，不该持续脉冲吸引注意力
       type: (status === 'offline' ? 'scatter' : 'effectScatter') as 'scatter' | 'effectScatter',
       coordinateSystem: 'geo' as const,
-      zlevel: status === 'normal' ? 1 : 2,
-      rippleEffect: { period: style.period, scale: 3, brushType: 'stroke' as const },
+      zlevel: abnormal ? 3 : 2,
+      rippleEffect: { period: style.period, scale: 3.2, brushType: 'stroke' as const },
+      // 提案里每个亮点旁都挂名字牌：正常压灰、异常用状态色，多机带 ×n
+      label: {
+        show: true,
+        position: 'right' as const,
+        distance: 7,
+        formatter: (p: any) => (p.value[2] > 1 ? `${p.name} ×${p.value[2]}` : p.name),
+        fontSize: 10,
+        fontWeight: (abnormal ? 600 : 500) as 600 | 500,
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+        color: abnormal ? color : palette.labelMuted,
+        textBorderColor: palette.labelBorder,
+        textBorderWidth: 2,
+      },
+      labelLayout: { hideOverlap: true },
       itemStyle: {
         color,
         shadowBlur: palette.glow,
         shadowColor: color,
-        opacity: status === 'offline' ? 0.8 : 1,
+        opacity: status === 'offline' ? 0.85 : 1,
       },
       emphasis: { scale: 1.25 },
       data: items,
@@ -492,21 +601,34 @@ function buildOption(
       map: 'world',
       roam: false,
       silent: true,
-      zoom: 1.15,
-      layoutCenter: ['50%', '50%'] as [string, string],
-      layoutSize: '100%',
-      itemStyle: {
-        areaColor: palette.land,
-        borderColor: palette.border,
-        borderWidth: 0.4,
-      },
-      // 有节点的国家底色略重，给亮点一点地理上下文
-      regions: [...activeRegions].map(name => ({
-        name,
-        itemStyle: { areaColor: palette.landActive },
-      })),
+      zoom: 1,
+      // 裁掉南极洲（点阵也没生成它），大陆能占满更多画面
+      boundingCoords: [
+        [-180, 86],
+        [180, -57],
+      ] as [number, number][],
+      // 直接铺满容器（contain 縮放）；layoutSize 与 boundingCoords 组合时不会撑满
+      left: 8,
+      right: 8,
+      top: 16,
+      bottom: 16,
+      // 大陆交给点阵 series 画，多边形只留着当坐标系
+      itemStyle: { areaColor: 'transparent', borderColor: 'transparent' },
     },
-    series,
+    series: [
+      {
+        type: 'scatter' as const,
+        coordinateSystem: 'geo' as const,
+        zlevel: 1,
+        silent: true,
+        large: true,
+        largeThreshold: 500,
+        symbolSize: 2.1,
+        itemStyle: { color: palette.dot },
+        data: landDots,
+      },
+      ...nodeSeries,
+    ],
   }
 }
 
