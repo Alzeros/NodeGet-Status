@@ -43,9 +43,11 @@ interface Props {
   onClose: () => void
   showSource?: boolean
   pool: BackendPool | null
+  /** 工作台视图内嵌模式：常驻右栏，没有"收起"概念，Esc 与收起按钮均禁用 */
+  embedded?: boolean
 }
 
-export function NodeDetail({ node, onClose, showSource, pool }: Props) {
+export function NodeDetail({ node, onClose, showSource, pool, embedded }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const headerRef = useRef<HTMLDivElement>(null)
   const [stuck, setStuck] = useState(false)
@@ -55,7 +57,7 @@ export function NodeDetail({ node, onClose, showSource, pool }: Props) {
   const [smoothCurve, setSmoothCurve] = useState(true)
 
   useEffect(() => {
-    if (!node) return
+    if (!node || embedded) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
     }
@@ -63,7 +65,7 @@ export function NodeDetail({ node, onClose, showSource, pool }: Props) {
     return () => {
       document.removeEventListener('keydown', onKey)
     }
-  }, [node, onClose])
+  }, [node, onClose, embedded])
 
   useEffect(() => {
     setStuck(false)
@@ -127,18 +129,22 @@ export function NodeDetail({ node, onClose, showSource, pool }: Props) {
         }`}
       >
         <div className="w-full px-4 sm:px-6 py-3 flex flex-wrap items-center gap-2 sm:gap-3">
-          <Button variant="ghost" size="icon" onClick={onClose} aria-label="收起" className="shrink-0">
-            <ArrowRight className="h-4 w-4" />
-          </Button>
+          {!embedded && (
+            <Button variant="ghost" size="icon" onClick={onClose} aria-label="收起" className="shrink-0">
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          )}
           <StatusDot online={node.online} />
           {logo && (
             <img src={logo} alt="" className="w-5 h-5 shrink-0 object-contain" loading="lazy" />
           )}
           <span className="font-semibold truncate min-w-0">{displayName(node)}</span>
           <Flag code={node.meta?.region} className="shrink-0" />
-          <span className="hidden md:inline truncate text-xs font-mono text-muted-foreground">
-            {node.uuid}
-          </span>
+          {!embedded && (
+            <span className="hidden md:inline truncate text-xs font-mono text-muted-foreground">
+              {node.uuid}
+            </span>
+          )}
           <div className="ml-auto flex flex-wrap gap-1.5 shrink-0">
             {node.meta?.region && <Badge variant="secondary">{node.meta.region}</Badge>}
             {showSource && (

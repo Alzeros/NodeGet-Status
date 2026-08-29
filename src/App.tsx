@@ -11,6 +11,7 @@ import { NodeCard } from './components/NodeCard'
 import { MiniCard } from './components/MiniCard'
 import { NodeTable } from './components/NodeTable'
 import { NodeDetail } from './components/NodeDetail'
+import { ConsoleView } from './components/ConsoleView'
 import { NodeCardSkeletonGrid } from './components/NodeCardSkeleton'
 import { TagFilter } from './components/TagFilter'
 import { RegionFilter } from './components/RegionFilter'
@@ -20,6 +21,7 @@ const WorldMap = lazy(() =>
   import('./components/WorldMap').then(m => ({ default: m.WorldMap })),
 )
 import { useStableStatus } from './hooks/useStableStatus'
+import { useMediaQuery } from './hooks/useMediaQuery'
 import { deriveUsage, displayName } from './utils/derive'
 import type { Sort, View } from './types'
 import type { NodeStatusCategory } from './utils/stableStatus'
@@ -30,7 +32,7 @@ const SORT_KEY = 'nodeget.sort'
 
 function initialView(): View {
   const v = localStorage.getItem(VIEW_KEY)
-  if (v === 'table' || v === 'map') return v
+  if (v === 'console' || v === 'table' || v === 'map') return v
   return 'cards'
 }
 
@@ -122,6 +124,11 @@ export function App() {
   // 移动端筛选面板默认收起：地区 chip 常有 10+ 个，展开会把节点卡挤出首屏
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
 
+  // 工作台视图只在 xl 起启用主从布局：再窄放不下"筛选栏 + 节点栏 + 详情"三列，
+  // 此时退化为纯列表 + 整页详情（与卡片视图的路径一致）
+  const isXl = useMediaQuery('(min-width: 1280px)')
+  const consoleEmbedded = view === 'console' && isXl
+
   useEffect(() => {
     localStorage.setItem(VIEW_KEY, view)
   }, [view])
@@ -131,10 +138,10 @@ export function App() {
   }, [sort])
 
   useEffect(() => {
-    if (selected) {
+    if (selected && !consoleEmbedded) {
       window.scrollTo({ top: 0, behavior: 'instant' })
     }
-  }, [selected])
+  }, [selected, consoleEmbedded])
 
   useEffect(() => {
     const onHash = () => setSelected(readHash())
@@ -456,7 +463,7 @@ export function App() {
 
           {/* 右侧主内容区 */}
           <div className="flex-1 min-w-0">
-            {!selectedNode ? (
+            {!selectedNode || consoleEmbedded ? (
               <div className="flex flex-col gap-6 animate-in fade-in duration-200">
                 {/* 小屏幕下显示原始堆叠布局 */}
                 {hasNodes && (
@@ -603,6 +610,17 @@ export function App() {
                       <NodeCard key={n.uuid} node={n} latencyTracks={latencyTracks.get(n.uuid)} status={stableStatuses.get(n.uuid)} counters={stableCounters.get(n.uuid)} />
                     ))}
                   </div>
+                )}
+                {hasResults && !hydrating && view === 'console' && (
+                  <ConsoleView
+                    nodes={list}
+                    latencyTracks={latencyTracks}
+                    statuses={stableStatuses}
+                    selectedNode={consoleEmbedded ? selectedNode : null}
+                    pool={pool}
+                    showSource={(config.site_tokens?.length ?? 0) > 1}
+                    embedded={consoleEmbedded}
+                  />
                 )}
                 {/* {hasResults && view === 'mini' && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
