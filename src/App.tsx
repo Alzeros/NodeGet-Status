@@ -628,6 +628,7 @@ export function App() {
                     nodes={list}
                     latencyTracks={latencyTracks}
                     statuses={stableStatuses}
+                    counters={stableCounters}
                     selectedNode={consoleEmbedded ? selectedNode : null}
                     pool={pool}
                     showSource={(config.site_tokens?.length ?? 0) > 1}

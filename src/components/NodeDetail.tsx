@@ -22,6 +22,8 @@ import { deriveUsage, displayName, osLabel, virtLabel } from '../utils/derive'
 import { cycleProgress, hasCost, remainingDays, remainingValue } from '../utils/cost'
 import { currentCycleId, nextCycleStartId } from '../utils/trafficCycle'
 import { cn, strokeColor } from '../utils/cn'
+import { getStatusReasons } from '../utils/stableStatus'
+import type { NodeStatusCategory, AbnormalCounters } from '../utils/stableStatus'
 import {
   buildLatencyChart,
   preprocessLatencyData,
@@ -46,9 +48,12 @@ interface Props {
   pool: BackendPool | null
   /** 工作台视图内嵌模式：常驻右栏，没有"收起"概念，Esc 与收起按钮均禁用 */
   embedded?: boolean
+  /** 传入时在头部显示异常原因徽章（如「CPU 高负载」） */
+  status?: NodeStatusCategory
+  counters?: AbnormalCounters
 }
 
-export function NodeDetail({ node, onClose, showSource, pool, embedded }: Props) {
+export function NodeDetail({ node, onClose, showSource, pool, embedded, status, counters }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const headerRef = useRef<HTMLDivElement>(null)
   const [stuck, setStuck] = useState(false)
@@ -100,6 +105,8 @@ export function NodeDetail({ node, onClose, showSource, pool, embedded }: Props)
     d?.load_one != null && d?.load_five != null && d?.load_fifteen != null
       ? `${d.load_one.toFixed(2)} / ${d.load_five.toFixed(2)} / ${d.load_fifteen.toFixed(2)}`
       : null
+  const reasonBadges =
+    status === 'warning' || status === 'risk' ? getStatusReasons(node, counters) : []
   const history = node.history || []
   const monthlyTraffic = node.monthlyTraffic
   const monthlyTrafficLimit = monthlyTraffic?.limit
@@ -138,6 +145,20 @@ export function NodeDetail({ node, onClose, showSource, pool, embedded }: Props)
           <DistroLogo node={node} className="w-5 h-5 shrink-0 object-contain" />
           <span className="font-semibold truncate min-w-0">{displayName(node)}</span>
           <Flag code={node.meta?.region} className="shrink-0" />
+          {reasonBadges.length > 0 && (
+            <div className="flex flex-wrap gap-1 shrink-0">
+              {reasonBadges.map(r => {
+                const color = status === 'risk'
+                  ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/25'
+                  : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/25'
+                return (
+                  <Badge key={r.key} variant="outline" className={cn('text-[10px] font-medium px-1.5 py-0', color)}>
+                    {r.display}
+                  </Badge>
+                )
+              })}
+            </div>
+          )}
           {!embedded && (
             <span className="hidden md:inline truncate text-xs font-mono text-muted-foreground">
               {node.uuid}

@@ -8,13 +8,14 @@ import { deriveUsage, displayName } from '../utils/derive'
 import { cn, loadColor } from '../utils/cn'
 import { avgLatency, type LatencyTracks } from '../utils/latency'
 import type { Node } from '../types'
-import type { NodeStatusCategory } from '../utils/stableStatus'
+import type { NodeStatusCategory, AbnormalCounters } from '../utils/stableStatus'
 import type { BackendPool } from '../api/pool'
 
 export interface ConsoleViewProps {
   nodes: Node[]
   latencyTracks: Map<string, LatencyTracks>
   statuses: Map<string, NodeStatusCategory>
+  counters: Map<string, AbnormalCounters>
   /** 全局选中节点（可能已被筛选出列表，仍应在右栏展示） */
   selectedNode: Node | null
   pool: BackendPool | null
@@ -88,6 +89,7 @@ export function ConsoleView({
   nodes,
   latencyTracks,
   statuses,
+  counters,
   selectedNode,
   pool,
   showSource,
@@ -141,6 +143,8 @@ export function ConsoleView({
             showSource={showSource}
             pool={pool}
             embedded
+            status={statuses.get(paneNode.uuid)}
+            counters={counters.get(paneNode.uuid)}
           />
         ) : (
           <div className="py-24 text-center text-sm text-muted-foreground">

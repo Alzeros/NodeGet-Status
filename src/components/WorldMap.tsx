@@ -191,13 +191,19 @@ export function WorldMap({ nodes, statuses, latencyTracks, onOpen }: Props) {
     }
   }, [])
 
-  const { clusters, unplaced, totals } = useMemo(() => {
+  const { clusters, unplaced, totals, netIn, netOut, trafficTotal } = useMemo(() => {
     const groups = new Map<string, { sumLng: number; sumLat: number; nodes: Node[] }>()
     const totals: Record<NodeStatusCategory, number> = { normal: 0, warning: 0, risk: 0, offline: 0 }
     let unplaced = 0
+    let netIn = 0
+    let netOut = 0
+    let trafficTotal = 0
 
     for (const n of nodes) {
       totals[statuses.get(n.uuid) ?? 'normal']++
+      netIn += n.dynamic?.receive_speed ?? 0
+      netOut += n.dynamic?.transmit_speed ?? 0
+      trafficTotal += (n.monthlyTraffic?.received ?? 0) + (n.monthlyTraffic?.transmitted ?? 0)
       const pos = ready ? positionOf(n) : null
       if (!pos) {
         if (ready) unplaced++
@@ -229,7 +235,7 @@ export function WorldMap({ nodes, statuses, latencyTracks, onOpen }: Props) {
       }
     })
 
-    return { clusters, unplaced, totals }
+    return { clusters, unplaced, totals, netIn, netOut, trafficTotal }
   }, [nodes, statuses, ready])
 
   const clusterMap = useMemo(() => new Map(clusters.map(c => [c.key, c])), [clusters])
@@ -315,6 +321,13 @@ export function WorldMap({ nodes, statuses, latencyTracks, onOpen }: Props) {
             <span className="text-emerald-500">{online}</span>
             <span className="text-muted-foreground/70">/{totalCount}</span>
           </Chip>
+          <Chip label="实时">
+            <span className="text-blue-500">↓ {bytes(netIn)}/s</span>
+            <span className="text-emerald-500 ml-1.5">↑ {bytes(netOut)}/s</span>
+          </Chip>
+          <Chip label="周期流量">
+            <span className="text-foreground/85">{bytes(trafficTotal)}</span>
+          </Chip>
           {totals.warning > 0 && (
             <Chip label="注意">
               <span className="text-amber-500">{totals.warning}</span>
@@ -395,31 +408,46 @@ function buildOption(
   }
 
   const series = ORDER.map(status => {
+    const style = STATUS_STYLE[status]
+    const color = status === 'offline' && !isDark ? OFFLINE_LIGHT : style.color
     const items = clusters
       .filter(c => c.status === status)
       .map(c => {
         const n = c.nodes.length
-        return {
-          name: clusterLabel(c),
-          key: c.key,
-          value: [c.lng, c.lat, n],
-          symbolSize: n > 1 ? Math.min(28, 9 + Math.log2(n) * 4.5) : 9,
-          label:
-            n > 1
+        // 出事的点常驻名字标签（提案如此）：告警不该藏在 hover 后面；
+        // 正常的多机气泡只标台数，保持安静
+        const label =
+          status !== 'normal'
+            ? {
+                show: true,
+                position: 'right' as const,
+                distance: 6,
+                formatter: n > 1 ? `${clusterLabel(c)} ×${n}` : clusterLabel(c),
+                fontSize: 10,
+                fontWeight: 600 as const,
+                color,
+                textBorderColor: isDark ? 'rgba(11,14,20,0.9)' : 'rgba(255,255,255,0.95)',
+                textBorderWidth: 2,
+              }
+            : n > 1
               ? {
                   show: true,
                   formatter: String(n),
                   position: 'inside' as const,
                   fontSize: 10,
                   fontWeight: 600 as const,
-                  color: status === 'offline' ? 'rgba(255,255,255,0.9)' : '#0b0e14',
+                  color: '#0b0e14',
                 }
-              : { show: false },
+              : { show: false }
+        return {
+          name: clusterLabel(c),
+          key: c.key,
+          value: [c.lng, c.lat, n],
+          symbolSize: n > 1 ? Math.min(28, 9 + Math.log2(n) * 4.5) : 9,
+          label,
         }
       })
 
-    const style = STATUS_STYLE[status]
-    const color = status === 'offline' && !isDark ? OFFLINE_LIGHT : style.color
     return {
       // 离线是"已经停了"，不该持续脉冲吸引注意力
       type: (status === 'offline' ? 'scatter' : 'effectScatter') as 'scatter' | 'effectScatter',
