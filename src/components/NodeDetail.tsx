@@ -46,14 +46,12 @@ interface Props {
   onClose: () => void
   showSource?: boolean
   pool: BackendPool | null
-  /** 工作台视图内嵌模式：常驻右栏，没有"收起"概念，Esc 与收起按钮均禁用 */
-  embedded?: boolean
   /** 传入时在头部显示异常原因徽章（如「CPU 高负载」） */
   status?: NodeStatusCategory
   counters?: AbnormalCounters
 }
 
-export function NodeDetail({ node, onClose, showSource, pool, embedded, status, counters }: Props) {
+export function NodeDetail({ node, onClose, showSource, pool, status, counters }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const headerRef = useRef<HTMLDivElement>(null)
   const [stuck, setStuck] = useState(false)
@@ -63,7 +61,7 @@ export function NodeDetail({ node, onClose, showSource, pool, embedded, status, 
   const [smoothCurve, setSmoothCurve] = useState(true)
 
   useEffect(() => {
-    if (!node || embedded) return
+    if (!node) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
     }
@@ -71,7 +69,7 @@ export function NodeDetail({ node, onClose, showSource, pool, embedded, status, 
     return () => {
       document.removeEventListener('keydown', onKey)
     }
-  }, [node, onClose, embedded])
+  }, [node, onClose])
 
   useEffect(() => {
     setStuck(false)
@@ -136,11 +134,9 @@ export function NodeDetail({ node, onClose, showSource, pool, embedded, status, 
         }`}
       >
         <div className="w-full px-4 sm:px-6 py-3 flex flex-wrap items-center gap-2 sm:gap-3">
-          {!embedded && (
-            <Button variant="ghost" size="icon" onClick={onClose} aria-label="收起" className="shrink-0">
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-          )}
+          <Button variant="ghost" size="icon" onClick={onClose} aria-label="收起" className="shrink-0">
+            <ArrowRight className="h-4 w-4" />
+          </Button>
           <StatusDot online={node.online} />
           <DistroLogo node={node} className="w-5 h-5 shrink-0 object-contain" />
           <span className="font-semibold truncate min-w-0">{displayName(node)}</span>
@@ -159,11 +155,9 @@ export function NodeDetail({ node, onClose, showSource, pool, embedded, status, 
               })}
             </div>
           )}
-          {!embedded && (
-            <span className="hidden md:inline truncate text-xs font-mono text-muted-foreground">
-              {node.uuid}
-            </span>
-          )}
+          <span className="hidden md:inline truncate text-xs font-mono text-muted-foreground">
+            {node.uuid}
+          </span>
           <div className="ml-auto flex flex-wrap gap-1.5 shrink-0">
             {node.meta?.region && <Badge variant="secondary">{node.meta.region}</Badge>}
             {showSource && (

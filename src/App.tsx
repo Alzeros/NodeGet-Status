@@ -123,11 +123,14 @@ export function App() {
   const [statusExpanded, setStatusExpanded] = useState(true)
   // 移动端筛选面板默认收起：地区 chip 常有 10+ 个，展开会把节点卡挤出首屏
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
+  // 工作台右栏是紧凑仪表盘，长尾内容（Ping/TCP 明细、系统信息、费用）在整页详情里，
+  // 由右栏的「查看完整详情」临时切过去，收起后仍回到工作台
+  const [fullDetail, setFullDetail] = useState(false)
 
   // 工作台与地图是满幅视图：不占左侧筛选栏，筛选改用顶部折叠面板。
   // 两栏（节点栏 + 详情）在 lg 起放得下，更窄则退化为纯列表 + 整页详情
   const isLg = useMediaQuery('(min-width: 1024px)')
-  const consoleEmbedded = view === 'console' && isLg
+  const consoleEmbedded = view === 'console' && isLg && !fullDetail
   const fullBleed = view === 'console' || view === 'map'
 
   useEffect(() => {
@@ -286,6 +289,7 @@ export function App() {
   // 离开工作台时清掉，否则切回卡片会直接落在整页详情上。
   // 反方向（卡片详情 → 工作台）保留选中，成为右栏当前项。
   const changeView = (v: View) => {
+    setFullDetail(false)
     if (view === 'console' && v !== 'console') setSelected(null)
     setView(v)
   }
@@ -630,9 +634,12 @@ export function App() {
                     statuses={stableStatuses}
                     counters={stableCounters}
                     selectedNode={consoleEmbedded ? selectedNode : null}
-                    pool={pool}
                     showSource={(config.site_tokens?.length ?? 0) > 1}
                     embedded={consoleEmbedded}
+                    onOpenFull={() => {
+                      setFullDetail(true)
+                      window.scrollTo({ top: 0, behavior: 'instant' })
+                    }}
                   />
                 )}
                 {/* {hasResults && view === 'mini' && (
@@ -681,11 +688,15 @@ export function App() {
               <NodeDetail
                 node={selectedNode}
                 onClose={() => {
-                  setSelected(null)
+                  // 从工作台点进来的：收起只退回工作台，选中保留在右栏
+                  if (!fullDetail) setSelected(null)
+                  setFullDetail(false)
                   window.scrollTo({ top: 0, behavior: 'instant' })
                 }}
                 showSource={(config.site_tokens?.length ?? 0) > 1}
                 pool={pool}
+                status={stableStatuses.get(selectedNode.uuid)}
+                counters={stableCounters.get(selectedNode.uuid)}
               />
             )}
           </div>

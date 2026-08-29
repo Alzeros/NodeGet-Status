@@ -2,14 +2,13 @@ import { memo, useEffect, useRef } from 'react'
 import { Progress } from './ui/progress'
 import { Flag } from './Flag'
 import { StatusDot } from './StatusDot'
-import { NodeDetail } from './NodeDetail'
+import { ConsolePane } from './ConsolePane'
 import { pct } from '../utils/format'
 import { deriveUsage, displayName } from '../utils/derive'
 import { cn, loadColor } from '../utils/cn'
 import { avgLatency, type LatencyTracks } from '../utils/latency'
 import type { Node } from '../types'
 import type { NodeStatusCategory, AbnormalCounters } from '../utils/stableStatus'
-import type { BackendPool } from '../api/pool'
 
 export interface ConsoleViewProps {
   nodes: Node[]
@@ -18,10 +17,11 @@ export interface ConsoleViewProps {
   counters: Map<string, AbnormalCounters>
   /** 全局选中节点（可能已被筛选出列表，仍应在右栏展示） */
   selectedNode: Node | null
-  pool: BackendPool | null
   showSource: boolean
   /** true = 宽屏主从布局；false = 退化为纯列表，点击走整页详情 */
   embedded: boolean
+  /** 右栏「查看完整详情」：切到整页 NodeDetail */
+  onOpenFull: () => void
 }
 
 interface RowProps {
@@ -91,9 +91,9 @@ export function ConsoleView({
   statuses,
   counters,
   selectedNode,
-  pool,
   showSource,
   embedded,
+  onOpenFull,
 }: ConsoleViewProps) {
   // 无选中时默认展示列表第一台，不写入 hash，保持 URL 干净
   const paneNode = selectedNode ?? nodes[0] ?? null
@@ -137,14 +137,14 @@ export function ConsoleView({
       </aside>
       <div className="flex-1 min-w-0">
         {paneNode ? (
-          <NodeDetail
+          <ConsolePane
+            key={paneNode.uuid}
             node={paneNode}
-            onClose={() => {}}
-            showSource={showSource}
-            pool={pool}
-            embedded
+            latencyTracks={latencyTracks.get(paneNode.uuid)}
             status={statuses.get(paneNode.uuid)}
             counters={counters.get(paneNode.uuid)}
+            showSource={showSource}
+            onOpenFull={onOpenFull}
           />
         ) : (
           <div className="py-24 text-center text-sm text-muted-foreground">
