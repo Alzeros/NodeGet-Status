@@ -6,7 +6,7 @@ import { NodeDetail } from './NodeDetail'
 import { pct } from '../utils/format'
 import { deriveUsage, displayName } from '../utils/derive'
 import { cn, loadColor } from '../utils/cn'
-import type { LatencyTracks } from '../utils/latency'
+import { avgLatency, type LatencyTracks } from '../utils/latency'
 import type { Node } from '../types'
 import type { NodeStatusCategory } from '../utils/stableStatus'
 import type { BackendPool } from '../api/pool'
@@ -21,24 +21,6 @@ export interface ConsoleViewProps {
   showSource: boolean
   /** true = 宽屏主从布局；false = 退化为纯列表，点击走整页详情 */
   embedded: boolean
-}
-
-// 聚合三网全部有效块的平均延迟，作为行内的单值概览
-function avgLatency(tracks?: LatencyTracks): number | null {
-  if (!tracks) return null
-  let sum = 0
-  let count = 0
-  for (const key of ['cm', 'cu', 'ct'] as const) {
-    const track = tracks[key]
-    if (!track) continue
-    for (const b of track.blocks) {
-      if (b && b.status !== 'empty' && b.avg != null && b.avg > 0) {
-        sum += b.avg
-        count++
-      }
-    }
-  }
-  return count > 0 ? sum / count : null
 }
 
 interface RowProps {

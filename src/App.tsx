@@ -638,7 +638,7 @@ export function App() {
                   </div>
                 )} */}
                 {/* {hasResults && view === 'table' && <NodeTable nodes={list} onOpen={setSelected} statuses={stableStatuses} counters={stableCounters} />} */}
-                {/* {hasResults && view === 'map' && (
+                {hasResults && !hydrating && view === 'map' && (
                   <Suspense
                     fallback={
                       <div className="py-24 flex items-center justify-center text-sm text-muted-foreground">
@@ -646,9 +646,14 @@ export function App() {
                       </div>
                     }
                   >
-                    <WorldMap nodes={list} onOpen={setSelected} />
+                    <WorldMap
+                      nodes={list}
+                      statuses={stableStatuses}
+                      latencyTracks={latencyTracks}
+                      onOpen={setSelected}
+                    />
                   </Suspense>
-                )} */}
+                )}
 
                 {hasErrors && (
                   <Alert variant="warning">

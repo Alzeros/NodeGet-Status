@@ -234,6 +234,24 @@ export interface LatencyTrack {
 
 export type LatencyTracks = Partial<Record<IspKey, LatencyTrack>>
 
+/** 聚合三网全部有效块的平均延迟，作为单值概览；无数据返回 null */
+export function avgLatency(tracks?: LatencyTracks): number | null {
+  if (!tracks) return null
+  let sum = 0
+  let count = 0
+  for (const key of ['cm', 'cu', 'ct'] as IspKey[]) {
+    const track = tracks[key]
+    if (!track) continue
+    for (const b of track.blocks) {
+      if (b && b.status !== 'empty' && b.avg != null && b.avg > 0) {
+        sum += b.avg
+        count++
+      }
+    }
+  }
+  return count > 0 ? sum / count : null
+}
+
 const ISP_CONFIG: Record<IspKey, { label: string; shortLabel: string }> = {
   cm: { label: '移动', shortLabel: 'CM' },
   cu: { label: '联通', shortLabel: 'CU' },

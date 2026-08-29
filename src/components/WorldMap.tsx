@@ -1,37 +1,54 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import * as echarts from 'echarts'
-import { AlertTriangle, ChevronRight, X } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRight, X } from 'lucide-react'
 import { Card } from './ui/card'
 import { Flag } from './Flag'
 import { StatusDot } from './StatusDot'
-import { displayName, distroLogo } from '../utils/derive'
+import { bytes, pct, uptime as fmtUptime } from '../utils/format'
+import { deriveUsage, displayName } from '../utils/derive'
+import { avgLatency, type LatencyTracks } from '../utils/latency'
 import type { Node } from '../types'
+import type { NodeStatusCategory } from '../utils/stableStatus'
 
 const MAP_W = 900
 const MAP_H = 520
-const TINY_DEG = 2
 const GEO_URL = `${import.meta.env.BASE_URL}world.geo.json`
 
-const HEAT = [
-  [254, 215, 170],
-  [251, 146, 60],
-  [194, 65, 12],
-]
+// 同一格内的节点合并为一个聚合气泡：世界地图铺满 900px 时约 0.4°/px，
+// 3° 对应约 8px，正好是"看上去叠在一起"的距离
+const CLUSTER_GRID = 3
+
+const STATUS_STYLE: Record<NodeStatusCategory, { color: string; period: number; label: string }> = {
+  normal: { color: '#3ecc79', period: 4, label: '正常' },
+  warning: { color: '#dba54a', period: 2, label: '注意' },
+  risk: { color: '#e06b63', period: 1.2, label: '风险' },
+  offline: { color: '#94a3b8', period: 0, label: '离线' },
+}
+
+// 聚合气泡取成员里最严重的状态着色：告警类优先于离线，
+// 因为它们需要人去处理；具体构成由气泡上的数字与抽屉给出
+const SEVERITY: Record<NodeStatusCategory, number> = { normal: 0, offline: 1, warning: 2, risk: 3 }
+
+const ORDER: NodeStatusCategory[] = ['normal', 'warning', 'risk', 'offline']
 
 const cnameMap = new Map<string, string>()
-const knownA2 = new Set<string>()
-const tinyCenter = new Map<string, [number, number]>()
+const centroid = new Map<string, [number, number]>()
 let mapPromise: Promise<void> | null = null
-
-interface CountryEntry {
-  online: number
-  offline: number
-  nodes: Node[]
-}
 
 interface Props {
   nodes: Node[]
+  statuses: Map<string, NodeStatusCategory>
+  latencyTracks: Map<string, LatencyTracks>
   onOpen?: (uuid: string) => void
+}
+
+interface Cluster {
+  key: string
+  lng: number
+  lat: number
+  nodes: Node[]
+  status: NodeStatusCategory
+  counts: Record<NodeStatusCategory, number>
 }
 
 function ringBbox(ring: number[][]) {
@@ -48,7 +65,8 @@ function ringBbox(ring: number[][]) {
   return { minLng, maxLng, minLat, maxLat, w: maxLng - minLng, h: maxLat - minLat }
 }
 
-function tinyMeta(geometry: any): { center: [number, number]; size: number } | null {
+/** 用最大子多边形的包围盒中心近似国家质心，作为缺少经纬度时的落点 */
+function polyCenter(geometry: any): [number, number] | null {
   if (!geometry?.coordinates) return null
   const polygons = geometry.type === 'MultiPolygon' ? geometry.coordinates : [geometry.coordinates]
   let best: ReturnType<typeof ringBbox> | null = null
@@ -64,22 +82,7 @@ function tinyMeta(geometry: any): { center: [number, number]; size: number } | n
     }
   }
   if (!best) return null
-  return {
-    center: [(best.minLng + best.maxLng) / 2, (best.minLat + best.maxLat) / 2],
-    size: Math.max(best.w, best.h),
-  }
-}
-
-function heatColor(t: number) {
-  const x = Math.min(1, Math.max(0, t))
-  const seg = x >= 0.5 ? 1 : 0
-  const f = (x - seg * 0.5) * 2
-  const a = HEAT[seg]
-  const b = HEAT[seg + 1]
-  const r = Math.round(a[0] + (b[0] - a[0]) * f)
-  const g = Math.round(a[1] + (b[1] - a[1]) * f)
-  const c = Math.round(a[2] + (b[2] - a[2]) * f)
-  return `rgb(${r},${g},${c})`
+  return [(best.minLng + best.maxLng) / 2, (best.minLat + best.maxLat) / 2]
 }
 
 function ensureMap() {
@@ -90,10 +93,9 @@ function ensureMap() {
         for (const f of geo.features ?? []) {
           const a2 = f.properties?.name
           if (!a2) continue
-          knownA2.add(a2)
           if (f.properties?.cname) cnameMap.set(a2, f.properties.cname)
-          const m = tinyMeta(f.geometry)
-          if (m && m.size < TINY_DEG) tinyCenter.set(a2, m.center)
+          const c = polyCenter(f.geometry)
+          if (c) centroid.set(a2, c)
         }
         echarts.registerMap('world', geo)
       })
@@ -105,11 +107,36 @@ function ensureMap() {
   return mapPromise
 }
 
-export function WorldMap({ nodes, onOpen }: Props) {
+function regionOf(n: Node) {
+  const a2 = n.meta?.region?.trim().toUpperCase()
+  return a2 && /^[A-Z]{2}$/.test(a2) ? a2 : null
+}
+
+/** 优先用节点自报的经纬度，缺失时退到国家质心 */
+function positionOf(n: Node): [number, number] | null {
+  const { lat, lng } = n.meta ?? {}
+  if (typeof lat === 'number' && typeof lng === 'number' && (lat !== 0 || lng !== 0)) {
+    return [lng, lat]
+  }
+  const a2 = regionOf(n)
+  return a2 ? centroid.get(a2) ?? null : null
+}
+
+function clusterLabel(c: Cluster) {
+  if (c.nodes.length === 1) return displayName(c.nodes[0])
+  const regions = new Set(c.nodes.map(regionOf).filter(Boolean) as string[])
+  if (regions.size === 1) {
+    const a2 = [...regions][0]
+    return cnameMap.get(a2) || a2
+  }
+  return `${c.nodes.length} 台节点`
+}
+
+export function WorldMap({ nodes, statuses, latencyTracks, onOpen }: Props) {
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<Error | null>(null)
-  const [pickedA2, setPickedA2] = useState<string | null>(null)
-  const [renderA2, setRenderA2] = useState<string | null>(null)
+  const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  const [drillUuid, setDrillUuid] = useState<string | null>(null)
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const chartRef = useRef<echarts.ECharts | null>(null)
 
@@ -127,58 +154,86 @@ export function WorldMap({ nodes, onOpen }: Props) {
     }
   }, [])
 
-  useEffect(() => {
-    if (pickedA2) {
-      setRenderA2(pickedA2)
-    } else if (renderA2) {
-      const t = window.setTimeout(() => setRenderA2(null), 160)
-      return () => clearTimeout(t)
-    }
-  }, [pickedA2, renderA2])
+  const { clusters, unplaced, totals } = useMemo(() => {
+    const groups = new Map<string, { sumLng: number; sumLat: number; nodes: Node[] }>()
+    const totals: Record<NodeStatusCategory, number> = { normal: 0, warning: 0, risk: 0, offline: 0 }
+    let unplaced = 0
 
-  const { byCountry, total } = useMemo(() => {
-    const map = new Map<string, CountryEntry>()
-    let total = 0
     for (const n of nodes) {
-      const a2 = n.meta?.region?.trim().toUpperCase()
-      if (!a2 || !/^[A-Z]{2}$/.test(a2)) continue
-      total++
-      const e = map.get(a2) || { online: 0, offline: 0, nodes: [] }
-      if (n.online) e.online++
-      else e.offline++
-      e.nodes.push(n)
-      map.set(a2, e)
+      totals[statuses.get(n.uuid) ?? 'normal']++
+      const pos = ready ? positionOf(n) : null
+      if (!pos) {
+        if (ready) unplaced++
+        continue
+      }
+      const key = `${Math.round(pos[0] / CLUSTER_GRID)}:${Math.round(pos[1] / CLUSTER_GRID)}`
+      const g = groups.get(key) ?? { sumLng: 0, sumLat: 0, nodes: [] }
+      g.sumLng += pos[0]
+      g.sumLat += pos[1]
+      g.nodes.push(n)
+      groups.set(key, g)
     }
-    return { byCountry: map, total }
-  }, [nodes])
 
+    const clusters: Cluster[] = [...groups.entries()].map(([key, g]) => {
+      const counts: Record<NodeStatusCategory, number> = { normal: 0, warning: 0, risk: 0, offline: 0 }
+      let status: NodeStatusCategory = 'normal'
+      for (const n of g.nodes) {
+        const s = statuses.get(n.uuid) ?? 'normal'
+        counts[s]++
+        if (SEVERITY[s] > SEVERITY[status]) status = s
+      }
+      return {
+        key,
+        lng: g.sumLng / g.nodes.length,
+        lat: g.sumLat / g.nodes.length,
+        nodes: g.nodes,
+        status,
+        counts,
+      }
+    })
+
+    return { clusters, unplaced, totals }
+  }, [nodes, statuses, ready])
+
+  const clusterMap = useMemo(() => new Map(clusters.map(c => [c.key, c])), [clusters])
+
+  // 动态数据每 2 秒刷新一次，但气泡的位置/状态/成员通常不变；
+  // 用签名把 setOption 限制在真正变化时，避免地图不停重绘
   const dataSig = useMemo(
     () =>
-      [...byCountry.entries()]
-        .map(([k, v]) => `${k}:${v.online}/${v.offline}`)
+      clusters
+        .map(c => `${c.key}|${c.status}|${c.nodes.length}`)
         .sort()
         .join(','),
-    [byCountry],
+    [clusters],
   )
 
-  const liveRef = useRef({ byCountry, onOpen })
+  const liveRef = useRef({ clusterMap })
   useEffect(() => {
-    liveRef.current = { byCountry, onOpen }
+    liveRef.current = { clusterMap }
   })
 
-  const option = useMemo(() => buildOption(byCountry), [dataSig, ready])
+  const option = useMemo(() => buildOption(clusters, liveRef), [dataSig, ready])
 
   useEffect(() => {
     if (!ready || !wrapRef.current) return
     if (!chartRef.current) {
-      chartRef.current = echarts.init(wrapRef.current)
-      chartRef.current.on('click', (p: any) => {
-        const cur = liveRef.current
-        const e = cur.byCountry.get(p.name)
-        if (!e) return
-        if (e.nodes.length === 1) cur.onOpen?.(e.nodes[0].uuid)
-        else setPickedA2(p.name)
+      const chart = echarts.init(wrapRef.current)
+      chart.on('click', (p: any) => {
+        if (p.componentType !== 'series') return
+        const key = p.data?.key
+        if (!key) return
+        setSelectedKey(key)
+        setDrillUuid(null)
       })
+      // 点空白处收起抽屉
+      chart.getZr().on('click', (ev: any) => {
+        if (!ev.target) {
+          setSelectedKey(null)
+          setDrillUuid(null)
+        }
+      })
+      chartRef.current = chart
     }
     chartRef.current.setOption(option, false)
   }, [ready, option])
@@ -197,19 +252,48 @@ export function WorldMap({ nodes, onOpen }: Props) {
     }
   }, [])
 
-  const renderEntry = renderA2 ? byCountry.get(renderA2) ?? null : null
+  const selected = selectedKey ? clusterMap.get(selectedKey) ?? null : null
+  const drillNode =
+    selected && drillUuid ? selected.nodes.find(n => n.uuid === drillUuid) ?? null : null
+  const paneNode = drillNode ?? (selected && selected.nodes.length === 1 ? selected.nodes[0] : null)
+  const online = totals.normal + totals.warning + totals.risk
+  const totalCount = online + totals.offline
 
   return (
     <Card className="p-3 sm:p-4">
-      <div className="flex items-center mb-3 px-1">
-        <div className="text-sm font-semibold text-foreground/90">地理位置</div>
-      </div>
-
       <div
         className="relative w-full overflow-hidden rounded-md border border-border/60 bg-[hsl(220_15%_8%)]"
         style={{ aspectRatio: `${MAP_W} / ${MAP_H}` }}
       >
         <div ref={wrapRef} className="absolute inset-0" />
+
+        {/* 聚合条 */}
+        <div className="absolute left-3 top-3 z-10 flex flex-wrap gap-1.5 pointer-events-none">
+          <Chip label="在线">
+            <span className="text-emerald-400">{online}</span>
+            <span className="text-white/40">/{totalCount}</span>
+          </Chip>
+          {totals.warning > 0 && (
+            <Chip label="注意">
+              <span className="text-amber-400">{totals.warning}</span>
+            </Chip>
+          )}
+          {totals.risk > 0 && (
+            <Chip label="风险">
+              <span className="text-rose-400">{totals.risk}</span>
+            </Chip>
+          )}
+          {totals.offline > 0 && (
+            <Chip label="离线">
+              <span className="text-white/70">{totals.offline}</span>
+            </Chip>
+          )}
+          {unplaced > 0 && (
+            <Chip label="无位置">
+              <span className="text-white/70">{unplaced}</span>
+            </Chip>
+          )}
+        </div>
 
         {error && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 text-center text-sm text-white/80">
@@ -219,192 +303,296 @@ export function WorldMap({ nodes, onOpen }: Props) {
           </div>
         )}
 
-        {!error && ready && total === 0 && (
+        {!error && ready && clusters.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center text-sm text-white/55 pointer-events-none">
-            没有节点设置过国家代码
+            没有节点设置过位置或国家代码
           </div>
         )}
 
-        {renderEntry && renderA2 && (
-          <NodePopover
-            a2={renderA2}
-            entry={renderEntry}
-            open={pickedA2 === renderA2}
-            onPick={uuid => {
-              setPickedA2(null)
-              onOpen?.(uuid)
+        {selected && (
+          <Drawer
+            cluster={selected}
+            node={paneNode}
+            latencyTracks={latencyTracks}
+            statuses={statuses}
+            onBack={() => setDrillUuid(null)}
+            onPick={setDrillUuid}
+            onOpen={onOpen}
+            onClose={() => {
+              setSelectedKey(null)
+              setDrillUuid(null)
             }}
-            onClose={() => setPickedA2(null)}
           />
         )}
-
-        <div className="absolute bottom-3 right-4 z-10 font-mono text-sm font-semibold tracking-wider text-white/85 pointer-events-none uppercase">
-          {total} nodes
-        </div>
       </div>
     </Card>
   )
 }
 
-function buildOption(byCountry: Map<string, CountryEntry>) {
-  const entries = [...byCountry.entries()].filter(([a2]) => knownA2.has(a2))
-  const data = entries.map(([a2, e]) => ({ name: a2, value: e.online + e.offline }))
-  const max = data.reduce((m, d) => Math.max(m, d.value), 0)
-  const tinyMarkers = entries
-    .map(([a2, e]) => {
-      const c = tinyCenter.get(a2)
-      if (!c) return null
-      const v = e.online + e.offline
-      const t = max > 0 ? v / max : 0
-      return {
-        name: a2,
-        coord: c,
-        value: v,
-        symbolSize: 6 + Math.min(8, Math.log2(v + 1) * 3),
-        itemStyle: {
-          color: heatColor(0.35 + 0.65 * t),
-          borderColor: 'rgba(20,22,28,0.85)',
-          borderWidth: 0.8,
-          shadowBlur: 8,
-          shadowColor: 'rgba(251,146,60,0.45)',
-        },
-      }
-    })
-    .filter((x): x is NonNullable<typeof x> => x != null)
+function Chip({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <span className="inline-flex items-baseline gap-1.5 rounded-md border border-white/10 bg-[rgba(16,20,29,0.82)] px-2 py-1 text-[11px] text-white/55">
+      {label}
+      <b className="font-mono text-[12px] font-semibold tabular-nums">{children}</b>
+    </span>
+  )
+}
+
+function buildOption(clusters: Cluster[], liveRef: { current: { clusterMap: Map<string, Cluster> } }) {
+  const activeRegions = new Set<string>()
+  for (const c of clusters) {
+    for (const n of c.nodes) {
+      const a2 = regionOf(n)
+      if (a2) activeRegions.add(a2)
+    }
+  }
+
+  const series = ORDER.map(status => {
+    const items = clusters
+      .filter(c => c.status === status)
+      .map(c => {
+        const n = c.nodes.length
+        return {
+          name: clusterLabel(c),
+          key: c.key,
+          value: [c.lng, c.lat, n],
+          symbolSize: n > 1 ? Math.min(28, 9 + Math.log2(n) * 4.5) : 9,
+          label:
+            n > 1
+              ? {
+                  show: true,
+                  formatter: String(n),
+                  position: 'inside' as const,
+                  fontSize: 10,
+                  fontWeight: 600 as const,
+                  color: status === 'offline' ? 'rgba(255,255,255,0.85)' : '#0b0e14',
+                }
+              : { show: false },
+        }
+      })
+
+    const style = STATUS_STYLE[status]
+    return {
+      // 离线是"已经停了"，不该持续脉冲吸引注意力
+      type: (status === 'offline' ? 'scatter' : 'effectScatter') as 'scatter' | 'effectScatter',
+      coordinateSystem: 'geo' as const,
+      zlevel: status === 'normal' ? 1 : 2,
+      rippleEffect: { period: style.period, scale: 3, brushType: 'stroke' as const },
+      itemStyle: {
+        color: style.color,
+        shadowBlur: 10,
+        shadowColor: style.color,
+        opacity: status === 'offline' ? 0.75 : 1,
+      },
+      emphasis: { scale: 1.25 },
+      data: items,
+    }
+  }).filter(s => s.data.length > 0)
 
   return {
     backgroundColor: 'transparent',
-    visualMap: {
-      type: 'continuous' as const,
-      min: max > 1 ? 1 : 0,
-      max: Math.max(max, 2),
-      show: max > 0,
-      seriesIndex: 0,
-      left: 16,
-      bottom: 16,
-      itemWidth: 10,
-      itemHeight: 90,
-      orient: 'horizontal' as const,
-      text: ['多', '少'],
-      textStyle: { color: 'rgba(255,255,255,0.55)', fontSize: 10 },
-      inRange: { color: ['#fed7aa', '#fb923c', '#c2410c'] },
-      outOfRange: { color: 'rgba(148,163,184,0.16)' },
-      calculable: false,
-    },
     tooltip: {
       trigger: 'item' as const,
-      backgroundColor: 'rgba(20,22,28,0.94)',
+      backgroundColor: 'rgba(16,20,29,0.94)',
       borderColor: 'rgba(148,163,184,0.3)',
       borderWidth: 1,
       padding: [6, 10] as [number, number],
       textStyle: { color: '#e5e7eb', fontSize: 12 },
       formatter: (p: any) => {
-        const a2 = p.name
-        const cname = cnameMap.get(a2)
-        const head = cname ? `${cname} <span style="color:#94a3b8">${a2}</span>` : a2
-        const e = byCountry.get(a2)
-        if (!e) return `<b>${head}</b><br/><span style="color:#94a3b8">无节点</span>`
-        const offline = e.offline
-          ? ` <span style="color:#94a3b8">· ${e.offline} 离线</span>`
-          : ''
-        return `<b>${head}</b><br/>${e.online + e.offline} 节点 <span style="color:#34d399">· ${e.online} 在线</span>${offline}`
+        const c = liveRef.current.clusterMap.get(p.data?.key)
+        if (!c) return ''
+        const head = `<b>${clusterLabel(c)}</b>`
+        if (c.nodes.length === 1) {
+          return `${head}<br/><span style="color:#94a3b8">${STATUS_STYLE[c.status].label}</span>`
+        }
+        const parts = ORDER.filter(s => c.counts[s] > 0).map(
+          s => `<span style="color:${STATUS_STYLE[s].color}">${c.counts[s]} ${STATUS_STYLE[s].label}</span>`,
+        )
+        return `${head}<br/>${c.nodes.length} 台 · ${parts.join(' · ')}`
       },
     },
-    series: [
-      {
-        type: 'map' as const,
-        map: 'world',
-        roam: false,
-        zoom: 1.15,
-        layoutCenter: ['50%', '50%'] as [string, string],
-        layoutSize: '100%',
-        selectedMode: false,
-        itemStyle: {
-          areaColor: 'rgba(148,163,184,0.16)',
-          borderColor: 'rgba(148,163,184,0.32)',
-          borderWidth: 0.4,
-        },
-        emphasis: {
-          label: { show: false },
-          itemStyle: { areaColor: '#fb923c' },
-        },
-        label: { show: false },
-        data,
-        markPoint: {
-          symbol: 'circle',
-          label: { show: false },
-          emphasis: { label: { show: false }, scale: 1.3 },
-          data: tinyMarkers,
-        },
+    geo: {
+      map: 'world',
+      roam: false,
+      silent: true,
+      zoom: 1.15,
+      layoutCenter: ['50%', '50%'] as [string, string],
+      layoutSize: '100%',
+      itemStyle: {
+        areaColor: 'rgba(148,163,184,0.10)',
+        borderColor: 'rgba(148,163,184,0.22)',
+        borderWidth: 0.4,
       },
-    ],
+      // 有节点的国家底色略亮，给亮点一点地理上下文
+      regions: [...activeRegions].map(name => ({
+        name,
+        itemStyle: { areaColor: 'rgba(148,163,184,0.22)' },
+      })),
+    },
+    series,
   }
 }
 
-function NodePopover({
-  a2,
-  entry,
-  open,
+function Drawer({
+  cluster,
+  node,
+  latencyTracks,
+  statuses,
+  onBack,
   onPick,
+  onOpen,
   onClose,
 }: {
-  a2: string
-  entry: CountryEntry
-  open: boolean
+  cluster: Cluster
+  node: Node | null
+  latencyTracks: Map<string, LatencyTracks>
+  statuses: Map<string, NodeStatusCategory>
+  onBack: () => void
   onPick: (uuid: string) => void
+  onOpen?: (uuid: string) => void
   onClose: () => void
 }) {
-  const cname = cnameMap.get(a2) || a2
+  const isList = !node
+  const canBack = node != null && cluster.nodes.length > 1
+
   return (
     <div
-      data-state={open ? 'open' : 'closed'}
-      className="absolute right-3 top-3 z-20 w-64 rounded-lg border border-border bg-popover text-popover-foreground shadow-xl overflow-hidden origin-top-right duration-150 fill-mode-forwards data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95"
+      className="absolute right-3 top-3 bottom-3 z-20 flex w-60 flex-col rounded-xl border border-white/10 bg-[rgba(16,20,29,0.94)] text-white/70 shadow-xl backdrop-blur-sm animate-in fade-in-0 slide-in-from-right-2 duration-150"
       onClick={e => e.stopPropagation()}
-      onMouseDown={e => e.stopPropagation()}
     >
-      <div key={a2} className="animate-in fade-in-0 duration-100 fill-mode-forwards">
-        <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border/70">
-          <Flag code={a2} className="shrink-0" />
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-semibold truncate leading-tight">{cname}</div>
-            <div className="text-[11px] text-muted-foreground font-mono mt-0.5">
-              <span className="text-emerald-500">{entry.online} 在线</span>
-              {entry.offline > 0 && <span className="ml-2">{entry.offline} 离线</span>}
-            </div>
-          </div>
+      <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2.5">
+        {canBack && (
           <button
-            onClick={onClose}
-            aria-label="关闭"
-            className="-mr-1 h-6 w-6 inline-flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent shrink-0"
+            type="button"
+            onClick={onBack}
+            aria-label="返回列表"
+            className="-ml-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-white/50 hover:bg-white/10 hover:text-white"
           >
-            <X className="h-3.5 w-3.5" />
+            <ArrowLeft className="h-3.5 w-3.5" />
           </button>
+        )}
+        {node ? (
+          <StatusDot online={node.online} status={statuses.get(node.uuid)} />
+        ) : (
+          <Flag code={regionOf(cluster.nodes[0]) ?? undefined} className="shrink-0" />
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[13px] font-semibold leading-tight text-white/90">
+            {node ? displayName(node) : clusterLabel(cluster)}
+          </div>
+          <div className="mt-0.5 font-mono text-[10px] text-white/45">
+            {node
+              ? STATUS_STYLE[statuses.get(node.uuid) ?? 'normal'].label
+              : `${cluster.nodes.length} 台节点`}
+          </div>
         </div>
-        <div className="max-h-72 overflow-auto py-1">
-          {entry.nodes.map(n => {
-            const logo = distroLogo(n)
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="关闭"
+          className="-mr-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-white/50 hover:bg-white/10 hover:text-white"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      {isList ? (
+        <div className="min-h-0 flex-1 overflow-auto py-1">
+          {cluster.nodes.map(n => {
+            const u = deriveUsage(n)
             return (
               <button
                 key={n.uuid}
+                type="button"
                 onClick={() => onPick(n.uuid)}
-                className="group w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-accent text-left transition-colors"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] transition-colors hover:bg-white/5"
               >
-                <StatusDot online={n.online} className="w-1.5 h-1.5 ring-1" />
-                {logo && (
-                  <img
-                    src={logo}
-                    alt=""
-                    className="w-3.5 h-3.5 shrink-0 object-contain opacity-80"
-                    loading="lazy"
-                  />
-                )}
-                <span className="truncate flex-1 text-foreground/90">{displayName(n)}</span>
-                <ChevronRight className="h-3 w-3 text-muted-foreground/40 shrink-0 transition-transform group-hover:translate-x-0.5 group-hover:text-muted-foreground" />
+                <StatusDot online={n.online} status={statuses.get(n.uuid)} />
+                <span className="min-w-0 flex-1 truncate text-white/85">{displayName(n)}</span>
+                <span className="shrink-0 font-mono text-[10px] tabular-nums text-white/45">
+                  {n.online ? pct(u.cpu) : '离线'}
+                </span>
               </button>
             )
           })}
         </div>
+      ) : (
+        <NodePane node={node} tracks={latencyTracks.get(node.uuid)} onOpen={onOpen} />
+      )}
+    </div>
+  )
+}
+
+function NodePane({
+  node,
+  tracks,
+  onOpen,
+}: {
+  node: Node
+  tracks?: LatencyTracks
+  onOpen?: (uuid: string) => void
+}) {
+  const u = deriveUsage(node)
+  const latency = avgLatency(tracks)
+  const traffic = node.monthlyTraffic
+  const trafficTotal = (traffic?.received ?? 0) + (traffic?.transmitted ?? 0)
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-auto px-3 py-3">
+      <Metric label="CPU" value={u.cpu} />
+      <Metric label="内存" value={u.mem} detail={u.memTotal ? `${bytes(u.memUsed)} / ${bytes(u.memTotal)}` : undefined} />
+      <Metric label="磁盘" value={u.disk} detail={u.diskTotal ? `${bytes(u.diskUsed)} / ${bytes(u.diskTotal)}` : undefined} />
+      <Metric
+        label="周期流量"
+        value={traffic?.percent}
+        detail={traffic ? (traffic.limit ? `${bytes(trafficTotal)} / ${bytes(traffic.limit)}` : bytes(trafficTotal)) : '等待采样'}
+      />
+
+      <dl className="mt-1 space-y-1.5 border-t border-white/10 pt-2.5 font-mono text-[11px]">
+        <Row k="实时" v={`↓ ${bytes(u.netIn || 0)}/s  ↑ ${bytes(u.netOut || 0)}/s`} />
+        <Row k="延迟" v={latency != null ? `${latency.toFixed(0)} ms` : '—'} />
+        <Row k="运行" v={fmtUptime(u.uptime)} />
+      </dl>
+
+      {onOpen && (
+        <button
+          type="button"
+          onClick={() => onOpen(node.uuid)}
+          className="mt-auto inline-flex items-center justify-center gap-1 rounded-md border border-white/10 px-2 py-1.5 text-[11px] text-sky-300 transition-colors hover:bg-white/5"
+        >
+          查看完整详情
+          <ArrowRight className="h-3 w-3" />
+        </button>
+      )}
+    </div>
+  )
+}
+
+function Metric({ label, value, detail }: { label: string; value?: number; detail?: string }) {
+  const v = Number.isFinite(value) ? (value as number) : null
+  const color = v == null ? '#94a3b8' : v >= 90 ? '#e06b63' : v >= 70 ? '#dba54a' : '#3ecc79'
+  return (
+    <div>
+      <div className="flex items-baseline justify-between text-[11px]">
+        <span className="text-white/55">{label}</span>
+        <span className="font-mono tabular-nums text-white/90">{pct(value)}</span>
       </div>
+      <div className="mt-1 h-1 overflow-hidden rounded-full bg-white/10">
+        <div
+          className="h-full rounded-full transition-[width] duration-300"
+          style={{ width: `${Math.min(100, Math.max(0, v ?? 0))}%`, backgroundColor: color }}
+        />
+      </div>
+      {detail && <div className="mt-1 truncate font-mono text-[10px] text-white/40">{detail}</div>}
+    </div>
+  )
+}
+
+function Row({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <dt className="text-white/45">{k}</dt>
+      <dd className="truncate text-white/80">{v}</dd>
     </div>
   )
 }
