@@ -7,6 +7,8 @@ import { StatusDot } from './StatusDot'
 import { bytes, pct, uptime as fmtUptime } from '../utils/format'
 import { deriveUsage, displayName } from '../utils/derive'
 import { avgLatency, type LatencyTracks } from '../utils/latency'
+import { cn, loadColor } from '../utils/cn'
+import { useIsDark } from '../hooks/useIsDark'
 import type { Node } from '../types'
 import type { NodeStatusCategory } from '../utils/stableStatus'
 
@@ -23,6 +25,40 @@ const STATUS_STYLE: Record<NodeStatusCategory, { color: string; period: number; 
   warning: { color: '#dba54a', period: 2, label: '注意' },
   risk: { color: '#e06b63', period: 1.2, label: '风险' },
   offline: { color: '#94a3b8', period: 0, label: '离线' },
+}
+
+// 状态色在两种底色上都够跳，只有离线的灰要压深一档才压得住浅色地图
+const OFFLINE_LIGHT = '#64748b'
+
+interface Palette {
+  land: string
+  landActive: string
+  border: string
+  glow: number
+  tooltipBg: string
+  tooltipBorder: string
+  tooltipText: string
+}
+
+const PALETTE: Record<'light' | 'dark', Palette> = {
+  light: {
+    land: 'rgba(148,163,184,0.26)',
+    landActive: 'rgba(100,116,139,0.40)',
+    border: 'rgba(100,116,139,0.40)',
+    glow: 6,
+    tooltipBg: 'rgba(255,255,255,0.97)',
+    tooltipBorder: 'rgba(100,116,139,0.28)',
+    tooltipText: '#1e293b',
+  },
+  dark: {
+    land: 'rgba(148,163,184,0.10)',
+    landActive: 'rgba(148,163,184,0.22)',
+    border: 'rgba(148,163,184,0.22)',
+    glow: 10,
+    tooltipBg: 'rgba(16,20,29,0.94)',
+    tooltipBorder: 'rgba(148,163,184,0.3)',
+    tooltipText: '#e5e7eb',
+  },
 }
 
 // 聚合气泡取成员里最严重的状态着色：告警类优先于离线，
@@ -133,6 +169,7 @@ function clusterLabel(c: Cluster) {
 }
 
 export function WorldMap({ nodes, statuses, latencyTracks, onOpen }: Props) {
+  const isDark = useIsDark()
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<Error | null>(null)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
@@ -213,7 +250,10 @@ export function WorldMap({ nodes, statuses, latencyTracks, onOpen }: Props) {
     liveRef.current = { clusterMap }
   })
 
-  const option = useMemo(() => buildOption(clusters, liveRef), [dataSig, ready])
+  const option = useMemo(
+    () => buildOption(clusters, liveRef, PALETTE[isDark ? 'dark' : 'light'], isDark),
+    [dataSig, ready, isDark],
+  )
 
   useEffect(() => {
     if (!ready || !wrapRef.current) return
@@ -262,7 +302,7 @@ export function WorldMap({ nodes, statuses, latencyTracks, onOpen }: Props) {
   return (
     <Card className="p-3 sm:p-4">
       <div
-        className="relative w-full overflow-hidden rounded-md border border-border/60 bg-[hsl(220_15%_8%)]"
+        className="relative w-full overflow-hidden rounded-md border border-border/60 bg-[hsl(210_20%_97%)] dark:bg-[hsl(220_15%_8%)]"
         style={{ aspectRatio: `${MAP_W} / ${MAP_H}` }}
       >
         <div ref={wrapRef} className="absolute inset-0" />
@@ -270,41 +310,41 @@ export function WorldMap({ nodes, statuses, latencyTracks, onOpen }: Props) {
         {/* 聚合条 */}
         <div className="absolute left-3 top-3 z-10 flex flex-wrap gap-1.5 pointer-events-none">
           <Chip label="在线">
-            <span className="text-emerald-400">{online}</span>
-            <span className="text-white/40">/{totalCount}</span>
+            <span className="text-emerald-500">{online}</span>
+            <span className="text-muted-foreground/70">/{totalCount}</span>
           </Chip>
           {totals.warning > 0 && (
             <Chip label="注意">
-              <span className="text-amber-400">{totals.warning}</span>
+              <span className="text-amber-500">{totals.warning}</span>
             </Chip>
           )}
           {totals.risk > 0 && (
             <Chip label="风险">
-              <span className="text-rose-400">{totals.risk}</span>
+              <span className="text-rose-500">{totals.risk}</span>
             </Chip>
           )}
           {totals.offline > 0 && (
             <Chip label="离线">
-              <span className="text-white/70">{totals.offline}</span>
+              <span className="text-foreground/80">{totals.offline}</span>
             </Chip>
           )}
           {unplaced > 0 && (
             <Chip label="无位置">
-              <span className="text-white/70">{unplaced}</span>
+              <span className="text-foreground/80">{unplaced}</span>
             </Chip>
           )}
         </div>
 
         {error && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 text-center text-sm text-white/80">
-            <AlertTriangle className="h-5 w-5 text-amber-400" />
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 text-center text-sm text-foreground/80">
+            <AlertTriangle className="h-5 w-5 text-amber-500" />
             <div>地图加载失败</div>
-            <div className="text-xs text-white/50 break-all">{error.message}</div>
+            <div className="text-xs text-muted-foreground break-all">{error.message}</div>
           </div>
         )}
 
         {!error && ready && clusters.length === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center text-sm text-white/55 pointer-events-none">
+          <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground pointer-events-none">
             没有节点设置过位置或国家代码
           </div>
         )}
@@ -331,14 +371,19 @@ export function WorldMap({ nodes, statuses, latencyTracks, onOpen }: Props) {
 
 function Chip({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <span className="inline-flex items-baseline gap-1.5 rounded-md border border-white/10 bg-[rgba(16,20,29,0.82)] px-2 py-1 text-[11px] text-white/55">
+    <span className="inline-flex items-baseline gap-1.5 rounded-md border border-border/70 bg-card/85 px-2 py-1 text-[11px] text-muted-foreground backdrop-blur-sm">
       {label}
       <b className="font-mono text-[12px] font-semibold tabular-nums">{children}</b>
     </span>
   )
 }
 
-function buildOption(clusters: Cluster[], liveRef: { current: { clusterMap: Map<string, Cluster> } }) {
+function buildOption(
+  clusters: Cluster[],
+  liveRef: { current: { clusterMap: Map<string, Cluster> } },
+  palette: Palette,
+  isDark: boolean,
+) {
   const activeRegions = new Set<string>()
   for (const c of clusters) {
     for (const n of c.nodes) {
@@ -365,13 +410,14 @@ function buildOption(clusters: Cluster[], liveRef: { current: { clusterMap: Map<
                   position: 'inside' as const,
                   fontSize: 10,
                   fontWeight: 600 as const,
-                  color: status === 'offline' ? 'rgba(255,255,255,0.85)' : '#0b0e14',
+                  color: status === 'offline' ? 'rgba(255,255,255,0.9)' : '#0b0e14',
                 }
               : { show: false },
         }
       })
 
     const style = STATUS_STYLE[status]
+    const color = status === 'offline' && !isDark ? OFFLINE_LIGHT : style.color
     return {
       // 离线是"已经停了"，不该持续脉冲吸引注意力
       type: (status === 'offline' ? 'scatter' : 'effectScatter') as 'scatter' | 'effectScatter',
@@ -379,10 +425,10 @@ function buildOption(clusters: Cluster[], liveRef: { current: { clusterMap: Map<
       zlevel: status === 'normal' ? 1 : 2,
       rippleEffect: { period: style.period, scale: 3, brushType: 'stroke' as const },
       itemStyle: {
-        color: style.color,
-        shadowBlur: 10,
-        shadowColor: style.color,
-        opacity: status === 'offline' ? 0.75 : 1,
+        color,
+        shadowBlur: palette.glow,
+        shadowColor: color,
+        opacity: status === 'offline' ? 0.8 : 1,
       },
       emphasis: { scale: 1.25 },
       data: items,
@@ -393,11 +439,11 @@ function buildOption(clusters: Cluster[], liveRef: { current: { clusterMap: Map<
     backgroundColor: 'transparent',
     tooltip: {
       trigger: 'item' as const,
-      backgroundColor: 'rgba(16,20,29,0.94)',
-      borderColor: 'rgba(148,163,184,0.3)',
+      backgroundColor: palette.tooltipBg,
+      borderColor: palette.tooltipBorder,
       borderWidth: 1,
       padding: [6, 10] as [number, number],
-      textStyle: { color: '#e5e7eb', fontSize: 12 },
+      textStyle: { color: palette.tooltipText, fontSize: 12 },
       formatter: (p: any) => {
         const c = liveRef.current.clusterMap.get(p.data?.key)
         if (!c) return ''
@@ -405,9 +451,10 @@ function buildOption(clusters: Cluster[], liveRef: { current: { clusterMap: Map<
         if (c.nodes.length === 1) {
           return `${head}<br/><span style="color:#94a3b8">${STATUS_STYLE[c.status].label}</span>`
         }
-        const parts = ORDER.filter(s => c.counts[s] > 0).map(
-          s => `<span style="color:${STATUS_STYLE[s].color}">${c.counts[s]} ${STATUS_STYLE[s].label}</span>`,
-        )
+        const parts = ORDER.filter(s => c.counts[s] > 0).map(s => {
+          const tone = s === 'offline' && !isDark ? OFFLINE_LIGHT : STATUS_STYLE[s].color
+          return `<span style="color:${tone}">${c.counts[s]} ${STATUS_STYLE[s].label}</span>`
+        })
         return `${head}<br/>${c.nodes.length} 台 · ${parts.join(' · ')}`
       },
     },
@@ -419,14 +466,14 @@ function buildOption(clusters: Cluster[], liveRef: { current: { clusterMap: Map<
       layoutCenter: ['50%', '50%'] as [string, string],
       layoutSize: '100%',
       itemStyle: {
-        areaColor: 'rgba(148,163,184,0.10)',
-        borderColor: 'rgba(148,163,184,0.22)',
+        areaColor: palette.land,
+        borderColor: palette.border,
         borderWidth: 0.4,
       },
-      // 有节点的国家底色略亮，给亮点一点地理上下文
+      // 有节点的国家底色略重，给亮点一点地理上下文
       regions: [...activeRegions].map(name => ({
         name,
-        itemStyle: { areaColor: 'rgba(148,163,184,0.22)' },
+        itemStyle: { areaColor: palette.landActive },
       })),
     },
     series,
@@ -457,16 +504,16 @@ function Drawer({
 
   return (
     <div
-      className="absolute right-3 top-3 bottom-3 z-20 flex w-60 flex-col rounded-xl border border-white/10 bg-[rgba(16,20,29,0.94)] text-white/70 shadow-xl backdrop-blur-sm animate-in fade-in-0 slide-in-from-right-2 duration-150"
+      className="absolute right-3 top-3 bottom-3 z-20 flex w-60 flex-col rounded-xl border border-border bg-popover/95 text-muted-foreground shadow-xl backdrop-blur-sm animate-in fade-in-0 slide-in-from-right-2 duration-150"
       onClick={e => e.stopPropagation()}
     >
-      <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2.5">
+      <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
         {canBack && (
           <button
             type="button"
             onClick={onBack}
             aria-label="返回列表"
-            className="-ml-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-white/50 hover:bg-white/10 hover:text-white"
+            className="-ml-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
           </button>
@@ -477,10 +524,10 @@ function Drawer({
           <Flag code={regionOf(cluster.nodes[0]) ?? undefined} className="shrink-0" />
         )}
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[13px] font-semibold leading-tight text-white/90">
+          <div className="truncate text-[13px] font-semibold leading-tight text-foreground">
             {node ? displayName(node) : clusterLabel(cluster)}
           </div>
-          <div className="mt-0.5 font-mono text-[10px] text-white/45">
+          <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
             {node
               ? STATUS_STYLE[statuses.get(node.uuid) ?? 'normal'].label
               : `${cluster.nodes.length} 台节点`}
@@ -490,7 +537,7 @@ function Drawer({
           type="button"
           onClick={onClose}
           aria-label="关闭"
-          className="-mr-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-white/50 hover:bg-white/10 hover:text-white"
+          className="-mr-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <X className="h-3.5 w-3.5" />
         </button>
@@ -505,11 +552,11 @@ function Drawer({
                 key={n.uuid}
                 type="button"
                 onClick={() => onPick(n.uuid)}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] transition-colors hover:bg-white/5"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] transition-colors hover:bg-accent"
               >
                 <StatusDot online={n.online} status={statuses.get(n.uuid)} />
-                <span className="min-w-0 flex-1 truncate text-white/85">{displayName(n)}</span>
-                <span className="shrink-0 font-mono text-[10px] tabular-nums text-white/45">
+                <span className="min-w-0 flex-1 truncate text-foreground/90">{displayName(n)}</span>
+                <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
                   {n.online ? pct(u.cpu) : '离线'}
                 </span>
               </button>
@@ -548,7 +595,7 @@ function NodePane({
         detail={traffic ? (traffic.limit ? `${bytes(trafficTotal)} / ${bytes(traffic.limit)}` : bytes(trafficTotal)) : '等待采样'}
       />
 
-      <dl className="mt-1 space-y-1.5 border-t border-white/10 pt-2.5 font-mono text-[11px]">
+      <dl className="mt-1 space-y-1.5 border-t border-border pt-2.5 font-mono text-[11px]">
         <Row k="实时" v={`↓ ${bytes(u.netIn || 0)}/s  ↑ ${bytes(u.netOut || 0)}/s`} />
         <Row k="延迟" v={latency != null ? `${latency.toFixed(0)} ms` : '—'} />
         <Row k="运行" v={fmtUptime(u.uptime)} />
@@ -558,7 +605,7 @@ function NodePane({
         <button
           type="button"
           onClick={() => onOpen(node.uuid)}
-          className="mt-auto inline-flex items-center justify-center gap-1 rounded-md border border-white/10 px-2 py-1.5 text-[11px] text-sky-300 transition-colors hover:bg-white/5"
+          className="mt-auto inline-flex items-center justify-center gap-1 rounded-md border border-border px-2 py-1.5 text-[11px] text-primary transition-colors hover:bg-accent"
         >
           查看完整详情
           <ArrowRight className="h-3 w-3" />
@@ -570,20 +617,21 @@ function NodePane({
 
 function Metric({ label, value, detail }: { label: string; value?: number; detail?: string }) {
   const v = Number.isFinite(value) ? (value as number) : null
-  const color = v == null ? '#94a3b8' : v >= 90 ? '#e06b63' : v >= 70 ? '#dba54a' : '#3ecc79'
   return (
     <div>
       <div className="flex items-baseline justify-between text-[11px]">
-        <span className="text-white/55">{label}</span>
-        <span className="font-mono tabular-nums text-white/90">{pct(value)}</span>
+        <span className="text-muted-foreground">{label}</span>
+        <span className="font-mono tabular-nums text-foreground">{pct(value)}</span>
       </div>
-      <div className="mt-1 h-1 overflow-hidden rounded-full bg-white/10">
+      <div className="mt-1 h-1 overflow-hidden rounded-full bg-muted">
         <div
-          className="h-full rounded-full transition-[width] duration-300"
-          style={{ width: `${Math.min(100, Math.max(0, v ?? 0))}%`, backgroundColor: color }}
+          className={cn('h-full rounded-full transition-[width] duration-300', loadColor(value))}
+          style={{ width: `${Math.min(100, Math.max(0, v ?? 0))}%` }}
         />
       </div>
-      {detail && <div className="mt-1 truncate font-mono text-[10px] text-white/40">{detail}</div>}
+      {detail && (
+        <div className="mt-1 truncate font-mono text-[10px] text-muted-foreground/80">{detail}</div>
+      )}
     </div>
   )
 }
@@ -591,8 +639,8 @@ function Metric({ label, value, detail }: { label: string; value?: number; detai
 function Row({ k, v }: { k: string; v: string }) {
   return (
     <div className="flex items-baseline justify-between gap-2">
-      <dt className="text-white/45">{k}</dt>
-      <dd className="truncate text-white/80">{v}</dd>
+      <dt className="text-muted-foreground">{k}</dt>
+      <dd className="truncate text-foreground/90">{v}</dd>
     </div>
   )
 }
