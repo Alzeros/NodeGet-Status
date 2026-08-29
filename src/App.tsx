@@ -23,6 +23,8 @@ const WorldMap = lazy(() =>
 import { useStableStatus } from './hooks/useStableStatus'
 import { useMediaQuery } from './hooks/useMediaQuery'
 import { deriveUsage, displayName } from './utils/derive'
+import { avgLatency } from './utils/latency'
+import { remainingDays } from './utils/cost'
 import type { Sort, View } from './types'
 import type { NodeStatusCategory } from './utils/stableStatus'
 
@@ -45,6 +47,9 @@ function readHash() {
 }
 
 const num = (v?: number) => (Number.isFinite(v) ? (v as number) : -Infinity)
+
+// 异常优先排序的严重度：告警类排在离线前——它们还活着、需要人马上处理
+const SEVERITY: Record<NodeStatusCategory, number> = { normal: 0, offline: 1, warning: 2, risk: 3 }
 
 export function App() {
   const { config, error: configError } = useConfig()
@@ -227,9 +232,19 @@ export function App() {
     }
 
     const rank = new Map(regions.list.map((r, i) => [r.code, i]))
+    // 延迟/到期在比较器里现算太浪费（延迟要扫 3×24 个块，到期要解析日期），先算好查表
+    const latencyOf =
+      sort === 'latency'
+        ? new Map(arr.map(n => [n.uuid, avgLatency(latencyTracks.get(n.uuid))]))
+        : null
+    const daysOf =
+      sort === 'expire'
+        ? new Map(arr.map(n => [n.uuid, remainingDays(n.meta?.expireTime ?? '')]))
+        : null
 
     return arr.sort((a, b) => {
-      if (a.online !== b.online) return a.online ? -1 : 1
+      // "异常优先"是唯一让离线浮上来的排序：其余排序沿用离线沉底
+      if (sort !== 'status' && a.online !== b.online) return a.online ? -1 : 1
 
       const ua = deriveUsage(a)
       const ub = deriveUsage(b)
@@ -241,6 +256,23 @@ export function App() {
       else if (sort === 'netOut') cmp = num(ub.netOut) - num(ua.netOut)
       else if (sort === 'uptime') cmp = num(ub.uptime) - num(ua.uptime)
       else if (sort === 'traffic') cmp = num(b.monthlyTraffic?.total) - num(a.monthlyTraffic?.total)
+      else if (sort === 'trafficPct')
+        cmp = num(b.monthlyTraffic?.percent) - num(a.monthlyTraffic?.percent)
+      else if (sort === 'status') {
+        cmp =
+          SEVERITY[stableStatuses.get(b.uuid) ?? 'normal'] -
+          SEVERITY[stableStatuses.get(a.uuid) ?? 'normal']
+      }
+      else if (sort === 'latency') {
+        // 差的在前，和其他"压力大在前"的排序保持同一方向；没开监控的沉底
+        cmp = num(latencyOf!.get(b.uuid) ?? undefined) - num(latencyOf!.get(a.uuid) ?? undefined)
+      }
+      else if (sort === 'expire') {
+        // 已过期(负数)/快到期在前，没设置到期时间的沉底
+        const da = daysOf!.get(a.uuid) ?? Infinity
+        const db = daysOf!.get(b.uuid) ?? Infinity
+        cmp = da - db
+      }
       else if (sort === 'region') {
         const ar = rank.get(a.meta?.region?.trim().toUpperCase() || '') ?? Infinity
         const br = rank.get(b.meta?.region?.trim().toUpperCase() || '') ?? Infinity
@@ -248,9 +280,10 @@ export function App() {
       }
       else if (sort === 'default') cmp = (a.meta?.order ?? 0) - (b.meta?.order ?? 0)
 
+      // 两边都无值时 ±Infinity 相减得 NaN，NaN 为假值，正好落到名称排序
       return cmp || displayName(a).localeCompare(displayName(b))
     })
-  }, [nodes, query, activeTag, activeRegion, activeStatus, sort, regions, stableStatuses])
+  }, [nodes, query, activeTag, activeRegion, activeStatus, sort, regions, stableStatuses, latencyTracks])
 
   const filteredStatusCounts = useMemo(() => {
     let arr = [...nodes.values()].filter(n => !n.meta?.hidden)

@@ -165,6 +165,8 @@ export type Sort =
   | 'default'
   | 'name'
   | 'region'
+  | 'status'
+  | 'latency'
   | 'cpu'
   | 'mem'
   | 'disk'
@@ -172,6 +174,8 @@ export type Sort =
   | 'netOut'
   | 'uptime'
   | 'traffic'
+  | 'trafficPct'
+  | 'expire'
 
 export type LatencyType = 'ping' | 'tcp_ping'
 

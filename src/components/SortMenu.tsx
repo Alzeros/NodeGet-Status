@@ -7,6 +7,8 @@ const OPTIONS: { value: Sort; label: string }[] = [
   { value: 'default', label: '默认' },
   { value: 'name', label: '名称' },
   { value: 'region', label: '地区' },
+  { value: 'status', label: '异常优先' },
+  { value: 'latency', label: '延迟' },
   { value: 'cpu', label: 'CPU 占用' },
   { value: 'mem', label: '内存占用' },
   { value: 'disk', label: '磁盘占用' },
@@ -14,6 +16,8 @@ const OPTIONS: { value: Sort; label: string }[] = [
   { value: 'netOut', label: '上行速度' },
   { value: 'uptime', label: '在线时长' },
   { value: 'traffic', label: '周期流量' },
+  { value: 'trafficPct', label: '流量占比' },
+  { value: 'expire', label: '到期时间' },
 ]
 
 export function SortMenu({ value, onChange }: { value: Sort; onChange: (v: Sort) => void }) {
