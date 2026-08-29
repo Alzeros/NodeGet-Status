@@ -281,6 +281,14 @@ export function App() {
     setActiveStatus(null)
   }
 
+  // 工作台里的选中只是"右栏显示哪台"的视图内部状态；
+  // 离开工作台时清掉，否则切回卡片会直接落在整页详情上。
+  // 反方向（卡片详情 → 工作台）保留选中，成为右栏当前项。
+  const changeView = (v: View) => {
+    if (view === 'console' && v !== 'console') setSelected(null)
+    setView(v)
+  }
+
   if (configError) {
     return (
       <div className="min-h-screen flex items-center justify-center p-8">
@@ -323,7 +331,7 @@ export function App() {
         query={query}
         onQuery={setQuery}
         view={view}
-        onView={setView}
+        onView={changeView}
         sort={sort}
         onSort={setSort}
       />
