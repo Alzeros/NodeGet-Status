@@ -303,7 +303,9 @@ export function WorldMap({ nodes, statuses, latencyTracks, onOpen }: Props) {
     <Card className="p-3 sm:p-4">
       <div
         className="relative w-full overflow-hidden rounded-md border border-border/60 bg-[hsl(210_20%_97%)] dark:bg-[hsl(220_15%_8%)]"
-        style={{ aspectRatio: `${MAP_W} / ${MAP_H}` }}
+        // 满幅后按固定比例会撑出一屏，限高让地图始终一眼看全；
+        // geo 自己保持比例，多出来的横向空间留白即可
+        style={{ aspectRatio: `${MAP_W} / ${MAP_H}`, maxHeight: 'calc(100vh - 200px)' }}
       >
         <div ref={wrapRef} className="absolute inset-0" />
 

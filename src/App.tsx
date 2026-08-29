@@ -124,10 +124,11 @@ export function App() {
   // 移动端筛选面板默认收起：地区 chip 常有 10+ 个，展开会把节点卡挤出首屏
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
 
-  // 工作台视图只在 xl 起启用主从布局：再窄放不下"筛选栏 + 节点栏 + 详情"三列，
-  // 此时退化为纯列表 + 整页详情（与卡片视图的路径一致）
-  const isXl = useMediaQuery('(min-width: 1280px)')
-  const consoleEmbedded = view === 'console' && isXl
+  // 工作台与地图是满幅视图：不占左侧筛选栏，筛选改用顶部折叠面板。
+  // 两栏（节点栏 + 详情）在 lg 起放得下，更窄则退化为纯列表 + 整页详情
+  const isLg = useMediaQuery('(min-width: 1024px)')
+  const consoleEmbedded = view === 'console' && isLg
+  const fullBleed = view === 'console' || view === 'map'
 
   useEffect(() => {
     localStorage.setItem(VIEW_KEY, view)
@@ -338,8 +339,8 @@ export function App() {
 
       <main className="flex-1 w-full max-w-[1600px] mx-auto px-6 sm:px-8 lg:px-12 xl:px-16 py-6 sm:py-8">
         <div className="flex gap-6">
-          {/* 左侧固定侧边栏 - 仅 lg 以上显示 */}
-          {hasNodes && (
+          {/* 左侧固定侧边栏 - 仅卡片视图、仅 lg 以上显示 */}
+          {hasNodes && !fullBleed && (
             <aside className="hidden lg:block w-[260px] shrink-0">
               <div className="sticky top-[60px] space-y-3 max-h-[calc(100vh-80px)] overflow-y-auto sidebar-scroll pb-4">
                 {/* 节点状态与地区筛选合并卡片 */}
@@ -473,8 +474,8 @@ export function App() {
           <div className="flex-1 min-w-0">
             {!selectedNode || consoleEmbedded ? (
               <div className="flex flex-col gap-6 animate-in fade-in duration-200">
-                {/* 小屏幕下显示原始堆叠布局 */}
-                {hasNodes && (
+                {/* 小屏幕下显示原始堆叠布局；满幅视图自带聚合信息，不再重复 */}
+                {hasNodes && !fullBleed && (
                   <div className="lg:hidden">
                     <GlobalStats
                       onlineCount={globalStats.onlineCount}
@@ -491,9 +492,10 @@ export function App() {
                   </div>
                 )}
                 {hasNodes && (
-                  <div className="lg:hidden">
-                    {/* 移动端把地区/标签/状态三组筛选收进一个可折叠面板：
-                        地区 chip 常有 10+ 个，平铺会把卡片挤到首屏之外。 */}
+                  <div className={fullBleed ? undefined : 'lg:hidden'}>
+                    {/* 地区/标签/状态三组筛选收进一个可折叠面板：移动端用它替代侧边栏，
+                        工作台/地图这类满幅视图则在所有宽度下都用它。
+                        地区 chip 常有 10+ 个，平铺会把内容挤到首屏之外。 */}
                     <button
                       type="button"
                       onClick={() => setMobileFiltersOpen(o => !o)}
@@ -535,7 +537,8 @@ export function App() {
                                 total={regions.total}
                                 active={activeRegion}
                                 onChange={setActiveRegion}
-                                layout="vertical"
+                                // 满幅视图的筛选条是横向的，窄栏才用竖排网格
+                                layout={fullBleed ? 'horizontal' : 'vertical'}
                               />
                             </div>
                           )}
@@ -560,7 +563,7 @@ export function App() {
                                 </button>
                               )}
                             </div>
-                            <div className="grid grid-cols-2 gap-1.5">
+                            <div className={cn(fullBleed ? 'flex flex-wrap gap-2' : 'grid grid-cols-2 gap-1.5')}>
                               {([
                                 { key: 'normal' as const, label: '正常', dot: 'bg-emerald-500' },
                                 { key: 'warning' as const, label: '注意', dot: 'bg-amber-500' },
@@ -572,7 +575,8 @@ export function App() {
                                   type="button"
                                   onClick={() => setActiveStatus(activeStatus === key ? null : key)}
                                   className={cn(
-                                    'flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border border-transparent transition-all duration-200 w-full',
+                                    'flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-transparent transition-all duration-200',
+                                    fullBleed ? 'rounded-full' : 'rounded-lg w-full',
                                     activeStatus === key
                                       ? 'bg-primary text-primary-foreground shadow-sm'
                                       : 'bg-secondary/40 text-foreground/80 hover:bg-secondary/80'
