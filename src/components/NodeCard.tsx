@@ -4,8 +4,9 @@ import { Card } from './ui/card'
 import { Progress } from './ui/progress'
 import { Flag } from './Flag'
 import { StatusDot } from './StatusDot'
+import { DistroLogo } from './DistroLogo'
 import { bytes, pct, relativeAge, uptime } from '../utils/format'
-import { cpuLabel, deriveUsage, displayName, distroLogo, osLabel, virtLabel } from '../utils/derive'
+import { cpuLabel, deriveUsage, displayName, osLabel, virtLabel } from '../utils/derive'
 import { cn, loadColor } from '../utils/cn'
 import type { LatencyTracks, IspKey } from '../utils/latency'
 import { UptimeBar } from './UptimeBar'
@@ -40,7 +41,6 @@ export const NodeCard = memo<NodeCardProps>(function NodeCard({ node, latencyTra
   const osInfo = osLabel(node)
   const virtInfo = virtLabel(node)
   const flagCode = node.meta?.region
-  const logoUrl = distroLogo(node)
   const isOnline = node.online
   const tags = Array.isArray(node.meta?.tags) ? node.meta.tags : []
 
@@ -126,9 +126,7 @@ export const NodeCard = memo<NodeCardProps>(function NodeCard({ node, latencyTra
         {/* Header */}
         <div className="flex items-center gap-2 flex-wrap">
           <StatusDot online={isOnline} status={status} />
-          {logoUrl && (
-            <img src={logoUrl} alt="" className="w-5 h-5 shrink-0 object-contain" loading="lazy" />
-          )}
+          <DistroLogo node={node} className="w-5 h-5 shrink-0 object-contain" />
           <span className="font-semibold flex-1 min-w-0 truncate" title={hostname}>
             {hostname}
           </span>

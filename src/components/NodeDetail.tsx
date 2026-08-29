@@ -16,8 +16,9 @@ import { Button } from './ui/button'
 import { Card } from './ui/card'
 import { Flag } from './Flag'
 import { StatusDot } from './StatusDot'
+import { DistroLogo } from './DistroLogo'
 import { bytes, pct, relativeAge, uptime } from '../utils/format'
-import { deriveUsage, displayName, distroLogo, osLabel, virtLabel } from '../utils/derive'
+import { deriveUsage, displayName, osLabel, virtLabel } from '../utils/derive'
 import { cycleProgress, hasCost, remainingDays, remainingValue } from '../utils/cost'
 import { currentCycleId, nextCycleStartId } from '../utils/trafficCycle'
 import { cn, strokeColor } from '../utils/cn'
@@ -93,7 +94,6 @@ export function NodeDetail({ node, onClose, showSource, pool, embedded }: Props)
   const cpu = node.static?.cpu
   const tags = node.meta?.tags ?? []
   const virt = virtLabel(node)
-  const logo = distroLogo(node)
   const swap =
     d?.total_swap && d.used_swap != null ? (d.used_swap / d.total_swap) * 100 : undefined
   const loadAvg =
@@ -135,9 +135,7 @@ export function NodeDetail({ node, onClose, showSource, pool, embedded }: Props)
             </Button>
           )}
           <StatusDot online={node.online} />
-          {logo && (
-            <img src={logo} alt="" className="w-5 h-5 shrink-0 object-contain" loading="lazy" />
-          )}
+          <DistroLogo node={node} className="w-5 h-5 shrink-0 object-contain" />
           <span className="font-semibold truncate min-w-0">{displayName(node)}</span>
           <Flag code={node.meta?.region} className="shrink-0" />
           {!embedded && (
