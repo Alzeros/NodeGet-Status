@@ -8,6 +8,8 @@
     "build": "vite build",
     "postbuild": "node scripts/build-template-config.mjs && node scripts/build-filelist.mjs && node scripts/build-zip.mjs && node scripts/build-config.mjs",
     "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
@@ -34,7 +36,8 @@
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.15",
     "typescript": "^6.0.3",
-    "vite": "^8.0.10"
+    "vite": "^8.0.10",
+    "vitest": "^4.1.11"
   },
   "overrides": {
     "uuid": "^14.0.0",

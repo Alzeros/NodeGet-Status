@@ -148,6 +148,7 @@ vite.config.ts.timestamp-*
 public/config.json
 .idea
 .claude/
+.superpowers/
 nodeget-theme.dev.json
 nodeget-theme.dev.jsonc
 # macOS

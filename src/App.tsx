@@ -25,6 +25,7 @@ import { useMediaQuery } from './hooks/useMediaQuery'
 import { deriveUsage, displayName } from './utils/derive'
 import { avgLatency } from './utils/latency'
 import { remainingDays } from './utils/cost'
+import { computeGlobalStats } from './utils/globalStats'
 import { SORT_NATURAL_DIR } from './components/SortMenu'
 import type { Sort, SortDir, View } from './types'
 import type { NodeStatusCategory } from './utils/stableStatus'
@@ -75,61 +76,27 @@ export function App() {
   const netInHistoryRef = useRef<number[]>([])
 
   const globalStats = useMemo(() => {
-    let onlineCount = 0
-    let totalCount = 0
-    let totalNetIn = 0
-    let totalNetOut = 0
-    let totalTrafficIn = 0
-    let totalTrafficOut = 0
-    const regions = new Set<string>()
+    const r = computeGlobalStats(nodes, stableStatuses)
 
-    for (const n of nodes.values()) {
-      if (n.meta?.hidden) continue
-      totalCount++
-      if (n.online) onlineCount++
-      totalNetIn += n.dynamic?.receive_speed ?? 0
-      totalNetOut += n.dynamic?.transmit_speed ?? 0
-      totalTrafficIn += n.monthlyTraffic?.received ?? 0
-      totalTrafficOut += n.monthlyTraffic?.transmitted ?? 0
-      const code = n.meta?.region?.trim().toUpperCase()
-      if (code) regions.add(code)
-    }
-
-    const statusCounts = { normal: 0, warning: 0, risk: 0, offline: 0 }
-    for (const n of nodes.values()) {
-      if (n.meta?.hidden) continue
-      const cat = stableStatuses.get(n.uuid) ?? 'normal'
-      statusCounts[cat]++
-    }
-
-    const totalBandwidth = totalNetIn + totalNetOut
-    const totalTraffic = totalTrafficIn + totalTrafficOut
+    // 滚动历史窗口：实时带宽 / 周期流量 / 下行速率三条 Sparkline 的数据源。
+    // 仅当值变化时入栈，满 20 点滚动淘汰。
     const bwHistory = bandwidthHistoryRef.current
-    if (bwHistory.length === 0 || bwHistory[bwHistory.length - 1] !== totalBandwidth) {
-      bwHistory.push(totalBandwidth)
+    if (bwHistory.length === 0 || bwHistory[bwHistory.length - 1] !== r.totalBandwidth) {
+      bwHistory.push(r.totalBandwidth)
       if (bwHistory.length > 20) bwHistory.shift()
     }
     const trHistory = trafficHistoryRef.current
-    if (trHistory.length === 0 || trHistory[trHistory.length - 1] !== totalTraffic) {
-      trHistory.push(totalTraffic)
+    if (trHistory.length === 0 || trHistory[trHistory.length - 1] !== r.totalTraffic) {
+      trHistory.push(r.totalTraffic)
       if (trHistory.length > 20) trHistory.shift()
     }
     const niHistory = netInHistoryRef.current
-    if (niHistory.length === 0 || niHistory[niHistory.length - 1] !== totalNetIn) {
-      niHistory.push(totalNetIn)
+    if (niHistory.length === 0 || niHistory[niHistory.length - 1] !== r.totalNetIn) {
+      niHistory.push(r.totalNetIn)
       if (niHistory.length > 20) niHistory.shift()
     }
 
-    return {
-      onlineCount,
-      totalCount,
-      totalNetIn,
-      totalNetOut,
-      totalTrafficIn,
-      totalTrafficOut,
-      regionCount: regions.size,
-      statusCounts,
-    }
+    return r
   }, [nodes, stableStatuses])
 
   const [view, setView] = useState<View>(initialView)
