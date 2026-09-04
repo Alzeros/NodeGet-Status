@@ -7,6 +7,7 @@ import { StatusDot } from './StatusDot'
 import { DistroLogo } from './DistroLogo'
 import { bytes, pct, relativeAge, uptime } from '../utils/format'
 import { cpuLabel, deriveUsage, displayName, osLabel, virtLabel } from '../utils/derive'
+import { daysUntilNextReset, nextCycleStartId } from '../utils/trafficCycle'
 import { cn, loadColor } from '../utils/cn'
 import type { LatencyTracks, IspKey } from '../utils/latency'
 import { UptimeBar } from './UptimeBar'
@@ -66,11 +67,28 @@ export const NodeCard = memo<NodeCardProps>(function NodeCard({ node, latencyTra
   const totalTraffic = trafficIn + trafficOut
   const trafficLimit = monthlyTraffic?.limit
   const trafficPercent = monthlyTraffic?.percent
-  const trafficDetail = trafficLimit
-    ? `${bytes(totalTraffic)} / ${bytes(trafficLimit)}`
-    : monthlyTraffic
-      ? `周期: ${bytes(totalTraffic)}`
-      : '等待定时采样'
+  const trafficResetDay = node.meta?.trafficResetDay ?? 1
+  const trafficResetIn = monthlyTraffic ? daysUntilNextReset(trafficResetDay) : null
+  const trafficBase =
+    trafficLimit
+      ? `${bytes(totalTraffic)} / ${bytes(trafficLimit)}`
+      : monthlyTraffic
+        ? `周期: ${bytes(totalTraffic)}`
+        : '等待定时采样'
+  // 字符串版给 title；节点版给卡片内显示——天数那段必须走比例字体，
+  // 等宽字体下「天」会按西文字符宽度补齐，把整行挤出卡片。
+  const trafficDetail = trafficResetIn ? `${trafficBase} · ${trafficResetIn}` : trafficBase
+  const trafficDetailNode: ReactNode = trafficResetIn ? (
+    <>
+      {trafficBase}
+      <span className="font-sans font-medium text-foreground/70">
+        <span className="mx-1 text-foreground/40">·</span>
+        {trafficResetIn}
+      </span>
+    </>
+  ) : (
+    trafficBase
+  )
 
   const resourceMetrics: ResourceMetricItem[] = [
     {
@@ -109,8 +127,10 @@ export const NodeCard = memo<NodeCardProps>(function NodeCard({ node, latencyTra
       ),
       percent: trafficPercent,
       barClassName: loadColor(trafficPercent),
-      detail: totalTraffic > 0 || trafficLimit || !monthlyTraffic ? trafficDetail : null,
-      detailTitle: trafficLimit ? `周期流量上限: ${bytes(trafficLimit)}` : undefined,
+      detail: totalTraffic > 0 || trafficLimit || !monthlyTraffic ? trafficDetailNode : null,
+      detailTitle: monthlyTraffic
+        ? `周期: ${nextCycleStartId(trafficResetDay)} 00:00 重置${trafficLimit ? ` · 上限 ${bytes(trafficLimit)}` : ''}`
+        : undefined,
     },
 
   ]

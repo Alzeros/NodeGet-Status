@@ -20,7 +20,7 @@ import { DistroLogo } from './DistroLogo'
 import { bytes, pct, relativeAge, uptime } from '../utils/format'
 import { deriveUsage, displayName, osLabel, virtLabel } from '../utils/derive'
 import { cycleProgress, hasCost, remainingDays, remainingValue } from '../utils/cost'
-import { currentCycleId, nextCycleStartId } from '../utils/trafficCycle'
+import { currentCycleId, daysUntilNextReset, nextCycleStartId } from '../utils/trafficCycle'
 import { cn, strokeColor } from '../utils/cn'
 import { getStatusReasons } from '../utils/stableStatus'
 import type { NodeStatusCategory, AbnormalCounters } from '../utils/stableStatus'
@@ -111,6 +111,9 @@ export function NodeDetail({ node, onClose, showSource, pool, status, counters }
   const monthlyTrafficPercent = monthlyTraffic?.percent
   const trafficResetDay = node.meta?.trafficResetDay ?? 1
   const cycleRangeLabel = `${mmdd(currentCycleId(trafficResetDay))} ~ ${mmdd(nextCycleStartId(trafficResetDay))}`
+  // 只显示到天；精确重置时刻挂 title，不占版面。跟着探针数据刷新走，不额外起定时器
+  const resetInDays = daysUntilNextReset(trafficResetDay)
+  const resetAtLabel = nextCycleStartId(trafficResetDay)
   const monthlyTrafficBar =
     monthlyTrafficPercent == null
       ? 'bg-muted-foreground/40'
@@ -363,11 +366,20 @@ export function NodeDetail({ node, onClose, showSource, pool, status, counters }
             <KV
               k="周期流量"
               v={
-                monthlyTraffic
-                  ? monthlyTrafficLimit
-                    ? `${bytes(monthlyTraffic.total)} / ${bytes(monthlyTrafficLimit)}`
-                    : bytes(monthlyTraffic.total)
-                  : null
+                monthlyTraffic ? (
+                  <>
+                    {monthlyTrafficLimit
+                      ? `${bytes(monthlyTraffic.total)} / ${bytes(monthlyTrafficLimit)}`
+                      : bytes(monthlyTraffic.total)}
+                    <span
+                      className="text-[11px] font-sans font-medium whitespace-nowrap text-foreground/70"
+                      title={`${resetAtLabel} 00:00 重置`}
+                    >
+                      <span className="mx-1 text-foreground/40">·</span>
+                      {resetInDays}
+                    </span>
+                  </>
+                ) : null
               }
             />
             <KV k="周期接收" v={monthlyTraffic ? bytes(monthlyTraffic.received) : null} />

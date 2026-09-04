@@ -1,9 +1,12 @@
 import prettyBytes from 'pretty-bytes'
 
-/** 1–10 TiB 区间用 4 位有效数字（如 1.234 TiB），避免整数截断看不出日增长 */
-function formatBytes(n: number) {
+/**
+ * `precise` 只在全局汇总处开：1–10 TiB 区间保留 4 位有效数字（如 1.235 TiB），
+ * 便于观察日增长。卡片等空间紧张处不要开——1 TiB 会被撑成 "1.000 TiB"，白白多吃三个字符。
+ */
+function formatBytes(n: number, precise = false) {
   const t = 1024 ** 4
-  if (n >= t && n < 10 * t) return `${(n / t).toPrecision(4)} TiB`
+  if (precise && n >= t && n < 10 * t) return `${(n / t).toPrecision(4)} TiB`
   return prettyBytes(n, { binary: true })
 }
 
@@ -11,8 +14,9 @@ export function bytes(n?: number | null) {
   return n && n > 0 ? formatBytes(n) : '0 B'
 }
 
+/** 拆分数字与单位供排版用。全局统计专用，带高精度。 */
 export function bytesParts(n?: number | null): { num: string; unit: string } {
-  const s = bytes(n)
+  const s = n && n > 0 ? formatBytes(n, true) : '0 B'
   const m = s.match(/^([\d.]+)\s*(.*)$/)
   if (m) return { num: m[1], unit: m[2] }
   return { num: s, unit: '' }
