@@ -69,9 +69,12 @@ export const NodeCard = memo<NodeCardProps>(function NodeCard({ node, latencyTra
   const trafficPercent = monthlyTraffic?.percent
   const trafficResetDay = node.meta?.trafficResetDay ?? 1
   const trafficResetIn = monthlyTraffic ? daysUntilNextReset(trafficResetDay) : null
+  const isMaxBilling = node.meta?.trafficBillingMode === 'max'
+  // X/limit 是「额度用了多少」，必须与进度条（percent）同口径——单向计费时用 max(上,下)，
+  // 否则双向合计会虚高导致剩余额度失真。双向总量在 ↑↓ 里本就可见，title 再注明。
   const trafficBase =
     trafficLimit
-      ? `${bytes(totalTraffic)} / ${bytes(trafficLimit)}`
+      ? `${bytes(isMaxBilling ? monthlyTraffic?.billed ?? totalTraffic : totalTraffic)} / ${bytes(trafficLimit)}`
       : monthlyTraffic
         ? `周期: ${bytes(totalTraffic)}`
         : '等待定时采样'
@@ -129,7 +132,13 @@ export const NodeCard = memo<NodeCardProps>(function NodeCard({ node, latencyTra
       barClassName: loadColor(trafficPercent),
       detail: totalTraffic > 0 || trafficLimit || !monthlyTraffic ? trafficDetailNode : null,
       detailTitle: monthlyTraffic
-        ? `周期: ${nextCycleStartId(trafficResetDay)} 00:00 重置${trafficLimit ? ` · 上限 ${bytes(trafficLimit)}` : ''}`
+        ? [
+            isMaxBilling ? `单向计费：取上/下行较大者，双向累计 ${bytes(totalTraffic)}` : null,
+            trafficLimit ? `上限 ${bytes(trafficLimit)}` : null,
+            `周期: ${nextCycleStartId(trafficResetDay)} 00:00 重置`,
+          ]
+            .filter(Boolean)
+            .join(' · ')
         : undefined,
     },
 

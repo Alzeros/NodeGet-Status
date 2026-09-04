@@ -6,6 +6,7 @@ import { Flag } from './Flag'
 import { StatusDot } from './StatusDot'
 import { DistroLogo } from './DistroLogo'
 import { bytes, pct, uptime } from '../utils/format'
+import { daysUntilNextReset, nextCycleStartId } from '../utils/trafficCycle'
 import { deriveUsage, displayName, osLabel, virtLabel } from '../utils/derive'
 import { cn, loadColor } from '../utils/cn'
 import type { LatencyTracks, TrackBlock } from '../utils/latency'
@@ -54,6 +55,8 @@ export const MiniCard = memo<MiniCardProps>(function MiniCard({ node, latencyTra
   const monthlyTraffic = node.monthlyTraffic
   const trafficIn = monthlyTraffic?.received ?? 0
   const trafficOut = monthlyTraffic?.transmitted ?? 0
+  const trafficResetDay = node.meta?.trafficResetDay ?? 1
+  const trafficResetIn = monthlyTraffic ? daysUntilNextReset(trafficResetDay) : null
 
   // 联通 (CU) 时间序列色块数据
   const cuTrack = latencyTracks?.cu
@@ -130,6 +133,16 @@ export const MiniCard = memo<MiniCardProps>(function MiniCard({ node, latencyTra
             <span className="text-emerald-500 font-mono">↑{bytes(trafficOut)}</span>
             <span className="text-muted-foreground/40">|</span>
             <span className="text-blue-500 font-mono">↓{bytes(trafficIn)}</span>
+            {trafficResetIn && (
+              // 父级是 flex + gap-1，左侧间距已由 gap 提供，这里只补右侧，圆点两边才对称
+              <span
+                className="font-sans font-medium text-foreground/70 whitespace-nowrap"
+                title={`${nextCycleStartId(trafficResetDay)} 00:00 重置`}
+              >
+                <span className="mr-1 text-foreground/40">·</span>
+                {trafficResetIn}
+              </span>
+            )}
           </div>
         </div>
 

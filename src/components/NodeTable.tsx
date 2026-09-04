@@ -127,7 +127,7 @@ export const NodeTable = memo<Props>(function NodeTable({ nodes, onOpen, statuse
                     hint={
                       monthlyTraffic
                         ? monthlyTraffic.limit
-                          ? `${bytes(monthlyTraffic.total)} / ${bytes(monthlyTraffic.limit)}`
+                          ? `${bytes(monthlyTraffic.billed ?? monthlyTraffic.total)} / ${bytes(monthlyTraffic.limit)}`
                           : bytes(monthlyTraffic.total)
                         : null
                     }

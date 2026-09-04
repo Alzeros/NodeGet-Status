@@ -744,7 +744,13 @@ function NodePane({
       <Metric
         label="周期流量"
         value={traffic?.percent}
-        detail={traffic ? (traffic.limit ? `${bytes(trafficTotal)} / ${bytes(traffic.limit)}` : bytes(trafficTotal)) : '等待采样'}
+        detail={
+          traffic
+            ? traffic.limit
+              ? `${bytes(traffic.billed ?? trafficTotal)} / ${bytes(traffic.limit)}`
+              : bytes(trafficTotal)
+            : '等待采样'
+        }
       />
 
       <dl className="mt-1 space-y-1.5 border-t border-border pt-2.5 font-mono text-[11px]">

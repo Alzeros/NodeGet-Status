@@ -149,6 +149,7 @@ public/config.json
 .idea
 .claude/
 .superpowers/
+.workbuddy/
 nodeget-theme.dev.json
 nodeget-theme.dev.jsonc
 # macOS

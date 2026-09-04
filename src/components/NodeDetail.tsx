@@ -110,6 +110,7 @@ export function NodeDetail({ node, onClose, showSource, pool, status, counters }
   const monthlyTrafficLimit = monthlyTraffic?.limit
   const monthlyTrafficPercent = monthlyTraffic?.percent
   const trafficResetDay = node.meta?.trafficResetDay ?? 1
+  const isMaxBilling = node.meta?.trafficBillingMode === 'max'
   const cycleRangeLabel = `${mmdd(currentCycleId(trafficResetDay))} ~ ${mmdd(nextCycleStartId(trafficResetDay))}`
   // 只显示到天；精确重置时刻挂 title，不占版面。跟着探针数据刷新走，不额外起定时器
   const resetInDays = daysUntilNextReset(trafficResetDay)
@@ -369,7 +370,7 @@ export function NodeDetail({ node, onClose, showSource, pool, status, counters }
                 monthlyTraffic ? (
                   <>
                     {monthlyTrafficLimit
-                      ? `${bytes(monthlyTraffic.total)} / ${bytes(monthlyTrafficLimit)}`
+                      ? `${bytes(isMaxBilling ? monthlyTraffic.billed ?? monthlyTraffic.total : monthlyTraffic.total)} / ${bytes(monthlyTrafficLimit)}`
                       : bytes(monthlyTraffic.total)}
                     <span
                       className="text-[11px] font-sans font-medium whitespace-nowrap text-foreground/70"
@@ -387,6 +388,14 @@ export function NodeDetail({ node, onClose, showSource, pool, status, counters }
             <KV
               k="周期占比"
               v={monthlyTrafficPercent != null ? pct(monthlyTrafficPercent) : null}
+            />
+            <KV
+              k="计费口径"
+              v={
+                isMaxBilling && monthlyTraffic
+                  ? `单向（取上/下行较大者）· 双向累计 ${bytes(monthlyTraffic.total)}`
+                  : null
+              }
             />
             {monthlyTrafficPercent != null && (
               <div className="my-2 h-1.5 w-full rounded-full bg-muted overflow-hidden">

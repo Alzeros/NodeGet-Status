@@ -8,6 +8,7 @@ import { StatusDot } from './StatusDot'
 import { DistroLogo } from './DistroLogo'
 import { UptimeBar } from './UptimeBar'
 import { bytes, pct, relativeAge, uptime } from '../utils/format'
+import { daysUntilNextReset, nextCycleStartId } from '../utils/trafficCycle'
 import { cpuLabel, deriveUsage, displayName, osLabel, virtLabel } from '../utils/derive'
 import { hasCost, remainingDays } from '../utils/cost'
 import { cn, loadColor } from '../utils/cn'
@@ -123,11 +124,35 @@ export function ConsolePane({
   }
 
   const mt = node.monthlyTraffic
-  const trafficDetail = mt
+  const trafficResetDay = node.meta?.trafficResetDay ?? 1
+  const trafficResetIn = mt ? daysUntilNextReset(trafficResetDay) : null
+  const isMaxBilling = node.meta?.trafficBillingMode === 'max'
+  // X/limit 与进度条（percent）同口径：单向计费时为 max(上,下)，否则剩余额度失真
+  const trafficBase = mt
     ? mt.limit
-      ? `${bytes(mt.total)} / ${bytes(mt.limit)}`
+      ? `${bytes(isMaxBilling ? mt.billed ?? mt.total : mt.total)} / ${bytes(mt.limit)}`
       : `↓ ${bytes(mt.received)} · ↑ ${bytes(mt.transmitted)}`
     : '等待定时采样'
+  const trafficDetailNode: ReactNode = trafficResetIn ? (
+    <>
+      {trafficBase}
+      <span className="font-sans font-medium text-foreground/70">
+        <span className="mx-1 text-foreground/40">·</span>
+        {trafficResetIn}
+      </span>
+    </>
+  ) : (
+    trafficBase
+  )
+  // 悬停提示：单向计费时注明双向累计，避免和别处的双向数字对不上
+  const trafficDetailText = mt
+    ? [
+        isMaxBilling ? `单向计费：取上/下行较大者，双向累计 ${bytes(mt.total)}` : null,
+        `周期: ${nextCycleStartId(trafficResetDay)} 00:00 重置`,
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    : undefined
 
   const swap =
     d?.total_swap && d.used_swap != null ? `${bytes(d.used_swap)} / ${bytes(d.total_swap)}` : null
@@ -214,7 +239,8 @@ export function ConsolePane({
           label="周期流量"
           value={mt?.percent != null ? pct(mt.percent) : mt ? bytes(mt.total) : '—'}
           percent={mt?.percent}
-          detail={trafficDetail}
+          detail={trafficDetailNode}
+          detailTitle={trafficDetailText}
         />
       </div>
 
@@ -408,11 +434,13 @@ function Stat({
   value,
   percent,
   detail,
+  detailTitle,
 }: {
   label: string
   value: string
   percent?: number
-  detail?: string | null
+  detail?: ReactNode | null
+  detailTitle?: string
 }) {
   return (
     <div className="rounded-xl border border-border/60 px-3 py-2.5 min-w-0">
@@ -426,7 +454,10 @@ function Stat({
         {value}
       </div>
       <Progress value={percent} indicatorClassName={loadColor(percent)} className="mt-2 h-1.5" />
-      <div className="mt-1.5 font-mono text-[11px] text-muted-foreground truncate" title={detail || undefined}>
+      <div
+        className="mt-1.5 font-mono text-[11px] text-muted-foreground truncate"
+        title={detailTitle || (typeof detail === 'string' ? detail || undefined : undefined)}
+      >
         {detail || ' '}
       </div>
     </div>

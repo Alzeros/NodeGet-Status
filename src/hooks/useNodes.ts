@@ -3,6 +3,7 @@ import { BackendPool } from '../api/pool'
 import { dynamicSummaryMulti, kvGetMulti, listAgentUuids, staticDataMulti, taskQuery } from '../api/methods'
 import { buildLatencyTracks } from '../utils/latency'
 import type { LatencyTracks } from '../utils/latency'
+import { billedTraffic } from '../utils/derive'
 import { isOnline } from '../utils/status'
 import { clampResetDay, currentCycleId } from '../utils/trafficCycle'
 import type { DynamicSummary, HistorySample, MonthlyTraffic, Node, NodeMeta, SiteConfig } from '../types'
@@ -54,6 +55,7 @@ const META_KEYS = [
   'metadata_expire_time',
   'metadata_traffic_limit',
   'metadata_traffic_reset_day',
+  'metadata_traffic_billing_mode',
 ]
 const DYN_INTERVAL_MS = 2000
 const LATENCY_INTERVAL_MS = 30_000
@@ -86,6 +88,7 @@ function emptyMeta(): NodeMeta {
     priceCycle: 30,
     expireTime: '',
     trafficResetDay: 1,
+    trafficBillingMode: 'dual',
   }
 }
 
@@ -203,6 +206,8 @@ function parseMeta(raw: Record<string, unknown>): NodeMeta {
   const price = Number(raw.metadata_price)
   const cycle = Number(raw.metadata_price_cycle)
   const trafficLimit = parseTrafficLimit(raw.metadata_traffic_limit) ?? (500 * 1024 ** 3)
+  // 单向计费开关：主控 metadata 填 "max" 生效，其余一律双向
+  const billingRaw = String(raw.metadata_traffic_billing_mode ?? '').trim().toLowerCase()
   return {
     name: raw.metadata_name ? String(raw.metadata_name) : '',
     region: raw.metadata_region ? String(raw.metadata_region) : '',
@@ -218,6 +223,7 @@ function parseMeta(raw: Record<string, unknown>): NodeMeta {
     expireTime: raw.metadata_expire_time ? String(raw.metadata_expire_time) : '',
     trafficLimit,
     trafficResetDay: clampResetDay(Number(raw.metadata_traffic_reset_day)),
+    trafficBillingMode: billingRaw === 'max' ? 'max' : 'dual',
   }
 }
 
@@ -493,12 +499,21 @@ export function useNodes(config: SiteConfig | null) {
       const dyn = live.get(uuid) || null
       const traffic = monthlyTraffic.get(monthlyTrafficMapKey(a.source, uuid))
       const trafficLimit = a.meta?.trafficLimit
+      const trafficBillingMode = a.meta?.trafficBillingMode ?? 'dual'
       const trafficPreview = traffic ? previewMonthlyTraffic(traffic, dyn) : undefined
+      // 计费口径用量：单向计费取上/下行较大者，双向计费为合计；percent 与 limit 的对比都用它
+      const billed = trafficPreview
+        ? billedTraffic(trafficPreview.received, trafficPreview.transmitted, trafficBillingMode)
+        : undefined
       const nodeMonthlyTraffic = trafficPreview
         ? {
             ...trafficPreview,
             limit: trafficLimit,
-            percent: trafficLimit && trafficLimit > 0 ? (trafficPreview.total / trafficLimit) * 100 : undefined,
+            billed,
+            percent:
+              trafficLimit && trafficLimit > 0 && billed != null
+                ? (billed / trafficLimit) * 100
+                : undefined,
           }
         : undefined
       out.set(uuid, {

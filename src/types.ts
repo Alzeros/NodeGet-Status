@@ -13,7 +13,15 @@ export interface NodeMeta {
   expireTime: string
   trafficLimit?: number
   trafficResetDay: number
+  /**
+   * 流量计费口径。dual（默认）= 双向合计计入额度；max = 单向计费，
+   * 取上/下行较大者计入额度（商家给的 limit 是单向额度）。
+   * 主控 metadata 字段：metadata_traffic_billing_mode = "max"
+   */
+  trafficBillingMode: TrafficBillingMode
 }
+
+export type TrafficBillingMode = 'dual' | 'max'
 
 export interface StaticSystem {
   system_name?: string
@@ -98,6 +106,8 @@ export interface MonthlyTraffic {
   lastReceived?: number
   lastTransmitted?: number
   total: number
+  /** 计费口径用量：dual = total（双向），max = max(received, transmitted)。与 percent 同口径 */
+  billed?: number
   limit?: number
   percent?: number
   startedAt: number

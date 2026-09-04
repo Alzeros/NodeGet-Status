@@ -1,4 +1,13 @@
-import type { Node, Usage } from '../types'
+import type { Node, TrafficBillingMode, Usage } from '../types'
+
+/**
+ * 按计费口径折算本期用量。
+ * dual（默认）：双向合计；max：单向计费，取上/下行较大者——
+ * 商家给的 limit 是单向额度，用双向合计算剩余会失真。
+ */
+export function billedTraffic(received: number, transmitted: number, mode: TrafficBillingMode) {
+  return mode === 'max' ? Math.max(received, transmitted) : received + transmitted
+}
 
 export function deriveUsage(node: Node): Usage {
   const d = node.dynamic
