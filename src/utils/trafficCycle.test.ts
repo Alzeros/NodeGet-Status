@@ -3,6 +3,8 @@ import {
   clampResetDay,
   currentCycleId,
   daysUntilNextReset,
+  localDateId,
+  localMonthId,
   nextCycleStartId,
   nextResetTime,
 } from './trafficCycle'
@@ -62,6 +64,20 @@ describe('流量周期切片', () => {
 
   test('1 月的周期起始要回溯到上一年 12 月', () => {
     expect(currentCycleId(5, at(2026, 1, 3))).toBe('2025-12-05')
+  })
+})
+
+describe('自然日/自然月窗口 id', () => {
+  test('按本地时区补零，与重置日无关', () => {
+    expect(localDateId(at(2026, 9, 8))).toBe('2026-09-08')
+    expect(localDateId(at(2026, 12, 31, 23))).toBe('2026-12-31')
+    expect(localMonthId(at(2026, 9, 8))).toBe('2026-09')
+    expect(localMonthId(at(2026, 12, 31, 23))).toBe('2026-12')
+  })
+
+  test('当天零点与当天末刻落在同一个窗口', () => {
+    expect(localDateId(at(2026, 9, 8, 0))).toBe(localDateId(at(2026, 9, 8, 23)))
+    expect(localMonthId(at(2026, 9, 1, 0))).toBe(localMonthId(at(2026, 9, 30, 23)))
   })
 })
 

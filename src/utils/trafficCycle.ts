@@ -22,6 +22,19 @@ export function clampResetDay(day: number | undefined | null) {
   return Number.isFinite(d) && d >= 1 && d <= 31 ? d : 1
 }
 
+/**
+ * 自然日窗口 id，YYYY-MM-DD。与计费周期无关——「今日流量」要的就是
+ * 所有机器共享同一个时间窗，这样榜单才横向可比。
+ */
+export function localDateId(now: Date = new Date()) {
+  return fmt(now.getFullYear(), now.getMonth(), now.getDate())
+}
+
+/** 自然月窗口 id，YYYY-MM。「当月流量」同理，不看各家重置日。 */
+export function localMonthId(now: Date = new Date()) {
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}`
+}
+
 interface YMD {
   year: number
   monthIndex0: number

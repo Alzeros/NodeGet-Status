@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { Dispatch, SetStateAction } from 'react'
 import { BackendPool } from '../api/pool'
 import { dynamicSummaryMulti, kvGetMulti, listAgentUuids, staticDataMulti, taskQuery } from '../api/methods'
 import { buildLatencyTracks } from '../utils/latency'
@@ -62,6 +63,9 @@ const LATENCY_INTERVAL_MS = 30_000
 const LATENCY_QUERY_TIMEOUT = 10_000
 const HISTORY_LIMIT = 60
 const TRAFFIC_CYCLE_KEY_PREFIX = 'metadata_traffic_cycle:'
+// 自然日/自然月窗口，由 scripts/monthly-traffic-worker.js 写入。
+// 窗口 id 在记录里，不在 key 上——前端不用猜主控时区，也省一次 KV 读。
+const TRAFFIC_WINDOW_KEY = 'metadata_traffic_window'
 
 interface MonthlyTrafficRecord {
   cycleId: string
@@ -104,24 +108,67 @@ function trafficCycleKvKey(cycleId: string) {
   return `${TRAFFIC_CYCLE_KEY_PREFIX}${cycleId}`
 }
 
+function toTrafficRecord(value: Partial<MonthlyTrafficRecord>, cycleId: string): MonthlyTrafficRecord {
+  return {
+    cycleId,
+    received: Number(value.received) || 0,
+    transmitted: Number(value.transmitted) || 0,
+    lastReceived: Number.isFinite(value.lastReceived) ? Number(value.lastReceived) : undefined,
+    lastTransmitted: Number.isFinite(value.lastTransmitted) ? Number(value.lastTransmitted) : undefined,
+    startedAt: Number(value.startedAt) || Date.now(),
+    updatedAt: Number(value.updatedAt) || 0,
+  }
+}
+
 function parseMonthlyTrafficRecord(raw: unknown, cycleId: string): MonthlyTrafficRecord | null {
   try {
     const value = typeof raw === 'string' ? JSON.parse(raw) : raw
     if (!value || typeof value !== 'object') return null
     const record = value as Partial<MonthlyTrafficRecord>
     if (record.cycleId !== cycleId) return null
-    return {
-      cycleId,
-      received: Number(record.received) || 0,
-      transmitted: Number(record.transmitted) || 0,
-      lastReceived: Number.isFinite(record.lastReceived) ? Number(record.lastReceived) : undefined,
-      lastTransmitted: Number.isFinite(record.lastTransmitted) ? Number(record.lastTransmitted) : undefined,
-      startedAt: Number(record.startedAt) || Date.now(),
-      updatedAt: Number(record.updatedAt) || 0,
-    }
+    return toTrafficRecord(record, cycleId)
   } catch {
     return null
   }
+}
+
+/**
+ * 单个自然日/自然月窗口。窗口 id 直接用记录里主控写下的值，不拿浏览器的"今天"去校验——
+ * 主控与访客未必同时区，按本地日期卡会把好数据判成过期。窗口 id 由 UI 明示给用户。
+ */
+function parseTrafficWindow(raw: unknown): MonthlyTraffic | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const window = raw as Partial<MonthlyTrafficRecord> & { id?: unknown }
+  const id = typeof window.id === 'string' ? window.id : ''
+  if (!id) return undefined
+  return toMonthlyTraffic(toTrafficRecord(window, id))
+}
+
+/**
+ * metadata_traffic_window 一条记录里带两个窗口。
+ * 靠结构识别（窗口有 day/month，周期桶有 cycleId），不依赖后端回显 KV key。
+ */
+function parseTrafficWindows(raw: unknown): { day?: MonthlyTraffic; month?: MonthlyTraffic } {
+  try {
+    const value = typeof raw === 'string' ? JSON.parse(raw) : raw
+    if (!value || typeof value !== 'object') return {}
+    const record = value as { day?: unknown; month?: unknown }
+    return { day: parseTrafficWindow(record.day), month: parseTrafficWindow(record.month) }
+  } catch {
+    return {}
+  }
+}
+
+function mergeTraffic(
+  setter: Dispatch<SetStateAction<Map<string, MonthlyTraffic>>>,
+  updates: Map<string, MonthlyTraffic>,
+) {
+  if (!updates.size) return
+  setter(prev => {
+    const next = new Map(prev)
+    for (const [key, value] of updates) next.set(key, value)
+    return next
+  })
 }
 
 function validTotal(value?: number | null) {
@@ -256,6 +303,8 @@ export function useNodes(config: SiteConfig | null) {
   const [pool, setPool] = useState<BackendPool | null>(null)
   const [latencyTracks, setLatencyTracks] = useState<Map<string, LatencyTracks>>(new Map())
   const [monthlyTraffic, setMonthlyTraffic] = useState<Map<string, MonthlyTraffic>>(new Map())
+  const [dailyTraffic, setDailyTraffic] = useState<Map<string, MonthlyTraffic>>(new Map())
+  const [calendarMonthTraffic, setCalendarMonthTraffic] = useState<Map<string, MonthlyTraffic>>(new Map())
 
   const agentsRef = useRef(agents)
   useEffect(() => { agentsRef.current = agents }, [agents])
@@ -283,33 +332,40 @@ export function useNodes(config: SiteConfig | null) {
     ) => {
       const now = new Date()
       const cycleByUuid = new Map<string, string>()
-      const items = rows
-        .filter(row => row.uuid)
-        .map(row => {
-          const resetDay = agentsRef.current.get(row.uuid)?.meta?.trafficResetDay ?? 1
-          const cycleId = currentCycleId(resetDay, now)
-          cycleByUuid.set(row.uuid, cycleId)
-          return { namespace: row.uuid, key: trafficCycleKvKey(cycleId) }
-        })
+      const items: { namespace: string; key: string }[] = []
+      for (const row of rows) {
+        if (!row.uuid) continue
+        const resetDay = agentsRef.current.get(row.uuid)?.meta?.trafficResetDay ?? 1
+        const cycleId = currentCycleId(resetDay, now)
+        cycleByUuid.set(row.uuid, cycleId)
+        items.push({ namespace: row.uuid, key: trafficCycleKvKey(cycleId) })
+        items.push({ namespace: row.uuid, key: TRAFFIC_WINDOW_KEY })
+      }
       if (!items.length) return
 
       const records = await kvGetMulti(entry.client, items).catch(() => [])
-      const updates = new Map<string, MonthlyTraffic>()
+      const cycleUpdates = new Map<string, MonthlyTraffic>()
+      const dayUpdates = new Map<string, MonthlyTraffic>()
+      const monthUpdates = new Map<string, MonthlyTraffic>()
       for (const row of records) {
+        const mapKey = monthlyTrafficMapKey(entry.name, row.namespace)
+        // 先按窗口结构试：命中就是 metadata_traffic_window，不必依赖后端回显 key
+        const windows = parseTrafficWindows(row.value)
+        if (windows.day || windows.month) {
+          if (windows.day) dayUpdates.set(mapKey, windows.day)
+          if (windows.month) monthUpdates.set(mapKey, windows.month)
+          continue
+        }
         const cycleId = cycleByUuid.get(row.namespace)
         if (!cycleId) continue
         const record = parseMonthlyTrafficRecord(row.value, cycleId)
         if (!record) continue
-        updates.set(monthlyTrafficMapKey(entry.name, row.namespace), toMonthlyTraffic(record))
+        cycleUpdates.set(mapKey, toMonthlyTraffic(record))
       }
 
-      if (updates.size) {
-        setMonthlyTraffic(prev => {
-          const next = new Map(prev)
-          for (const [key, value] of updates) next.set(key, value)
-          return next
-        })
-      }
+      mergeTraffic(setMonthlyTraffic, cycleUpdates)
+      mergeTraffic(setDailyTraffic, dayUpdates)
+      mergeTraffic(setCalendarMonthTraffic, monthUpdates)
     }
 
     const bootstrap = async () => {
@@ -497,7 +553,8 @@ export function useNodes(config: SiteConfig | null) {
     const out = new Map<string, Node>()
     for (const [uuid, a] of agents) {
       const dyn = live.get(uuid) || null
-      const traffic = monthlyTraffic.get(monthlyTrafficMapKey(a.source, uuid))
+      const mapKey = monthlyTrafficMapKey(a.source, uuid)
+      const traffic = monthlyTraffic.get(mapKey)
       const trafficLimit = a.meta?.trafficLimit
       const trafficBillingMode = a.meta?.trafficBillingMode ?? 'dual'
       const trafficPreview = traffic ? previewMonthlyTraffic(traffic, dyn) : undefined
@@ -516,16 +573,21 @@ export function useNodes(config: SiteConfig | null) {
                 : undefined,
           }
         : undefined
+      // 自然日/自然月窗口：同样用实时计数器往前推，避免 30 分钟采样间隔里数字冻住
+      const dayRecord = dailyTraffic.get(mapKey)
+      const monthRecord = calendarMonthTraffic.get(mapKey)
       out.set(uuid, {
         ...a,
         dynamic: dyn,
         history: history.get(uuid) || [],
         online: isOnline(dyn?.timestamp, now),
         monthlyTraffic: nodeMonthlyTraffic,
+        dailyTraffic: dayRecord ? previewMonthlyTraffic(dayRecord, dyn) : undefined,
+        calendarMonthTraffic: monthRecord ? previewMonthlyTraffic(monthRecord, dyn) : undefined,
       })
     }
     return out
-  }, [agents, live, history, monthlyTraffic, tick])
+  }, [agents, live, history, monthlyTraffic, dailyTraffic, calendarMonthTraffic, tick])
 
   return { nodes, errors, loading, pool, latencyTracks, metaHydrated }
 }

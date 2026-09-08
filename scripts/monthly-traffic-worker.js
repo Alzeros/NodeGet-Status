@@ -1,17 +1,31 @@
 /*
- * NodeGet monthly traffic sampler.
+ * NodeGet traffic sampler.
  *
  * Create a JS Worker in the NodeGet controller with this code, for example named:
  * monthly_traffic_sampler
  *
  * Then create a scheduled JS Worker task for that worker. Recommended interval:
  * every 30 minutes.
+ *
+ * 每次采样写两个 KV：
+ *   metadata_traffic_cycle:<周期起始日>  按各机器自己的重置日切片，供额度/剩余量展示
+ *   metadata_traffic_window             自然日 + 自然月两个窗口，供跨机器可比的流量榜单
+ * 窗口桶是后加的，只从本 worker 更新后开始累计，历史数据无法回填。
  */
 
 const DEFAULT_TOKEN = ''
 const TRAFFIC_CYCLE_KEY_PREFIX = 'metadata_traffic_cycle:'
+// 自然日/自然月窗口。跟计费周期是两套口径：周期桶回答"这台快超额没"，
+// 窗口桶回答"今天/本月谁跑得多"——所有机器共享同一时间窗，榜单才横向可比。
+// 两个窗口塞进同一个 key：读写各一次，且窗口 id 由主控（而非浏览器）写定，
+// 前端不必猜主控在哪个时区。
+const TRAFFIC_WINDOW_KEY = 'metadata_traffic_window'
 const RESET_DAY_KEY = 'metadata_traffic_reset_day'
 const DYNAMIC_FIELDS = ['total_received', 'total_transmitted']
+// 写回时的并发度：节点多时串行跑会把 cron 窗口拖满
+const WRITE_CONCURRENCY = 10
+// 批量读的分片大小（节点数）：每台读 2 个 key，分片是为了限制单个请求体积
+const READ_CHUNK = 100
 
 // 流量统计周期：按每台服务器自己的"重置日"（每月几号）切片，而不是日历月。
 // 商家的流量重置日通常对齐账单日/购买日，未必是每月 1 号。
@@ -53,6 +67,14 @@ function currentCycleId(resetDay, now) {
 
 function trafficCycleKvKey(cycleId) {
   return `${TRAFFIC_CYCLE_KEY_PREFIX}${cycleId}`
+}
+
+function localDateId(now) {
+  return fmt(now.getFullYear(), now.getMonth(), now.getDate())
+}
+
+function localMonthId(now) {
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}`
 }
 
 function validTotal(value) {
@@ -108,8 +130,68 @@ function advanceRecord(record, row, now) {
   }
 }
 
+function parseWindow(value) {
+  if (!value || typeof value !== 'object' || typeof value.id !== 'string' || !value.id) return null
+  return {
+    id: value.id,
+    received: Number(value.received) || 0,
+    transmitted: Number(value.transmitted) || 0,
+    lastReceived: Number.isFinite(value.lastReceived) ? Number(value.lastReceived) : undefined,
+    lastTransmitted: Number.isFinite(value.lastTransmitted) ? Number(value.lastTransmitted) : undefined,
+    startedAt: Number(value.startedAt) || Date.now(),
+    updatedAt: Number(value.updatedAt) || 0,
+  }
+}
+
+function parseWindows(raw) {
+  try {
+    const value = typeof raw === 'string' ? JSON.parse(raw) : raw
+    if (!value || typeof value !== 'object') return {}
+    return { day: parseWindow(value.day), month: parseWindow(value.month) }
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * 推进一个统计窗口。窗口 id 变了（跨日/跨月）就重新起桶，但基线继承上一个桶的
+ * lastReceived —— 采样间隔横跨零点的那段流量会记进新窗口，不丢也不重复计。
+ * 这也是窗口桶不按日期拆 key 的原因：上一桶的基线就在同一条记录里，零成本拿到。
+ */
+function advanceWindow(prev, id, row, now) {
+  const currentReceived = validTotal(row.total_received)
+  const currentTransmitted = validTotal(row.total_transmitted)
+  const base =
+    prev && prev.id === id
+      ? prev
+      : {
+          id,
+          received: 0,
+          transmitted: 0,
+          lastReceived: prev?.lastReceived,
+          lastTransmitted: prev?.lastTransmitted,
+          startedAt: now,
+        }
+  return {
+    id,
+    received: base.received + trafficDelta(currentReceived, base.lastReceived),
+    transmitted: base.transmitted + trafficDelta(currentTransmitted, base.lastTransmitted),
+    lastReceived: currentReceived ?? base.lastReceived,
+    lastTransmitted: currentTransmitted ?? base.lastTransmitted,
+    startedAt: base.startedAt,
+    updatedAt: now,
+  }
+}
+
 function resolveToken(params = {}, env = {}) {
   return params.token || env.DEFAULT_TOKEN || DEFAULT_TOKEN
+}
+
+/** 按并发度分批跑，避免节点多时把 cron 窗口拖满，也不至于一次打爆主控 */
+async function inBatches(items, size, fn) {
+  for (let i = 0; i < items.length; i += size) {
+    await Promise.all(items.slice(i, i + size).map(fn))
+  }
 }
 
 async function call(method, params = {}, token = DEFAULT_TOKEN) {
@@ -174,6 +256,8 @@ async function syncMonthlyTraffic(params = {}, env = {}) {
   const token = resolveToken(params, env)
   const now = Date.now()
   const nowDate = new Date(now)
+  const dayId = localDateId(nowDate)
+  const monthId = localMonthId(nowDate)
 
   const uuidResult = await call('nodeget-server_list_all_agent_uuid', {}, token)
   const uuids = uuidResult?.uuids || []
@@ -193,28 +277,72 @@ async function syncMonthlyTraffic(params = {}, env = {}) {
     if (r && r.namespace) resetDayByUuid.set(r.namespace, clampResetDay(r.value))
   }
 
-  let updated = 0
+  // 有效计数器的节点才处理；顺手算出各自的周期 key
+  const targets = []
   for (const row of rows || []) {
     if (!row?.uuid) continue
     if (validTotal(row.total_received) == null && validTotal(row.total_transmitted) == null) continue
-
     const resetDay = resetDayByUuid.get(row.uuid) ?? 1
     const cycleId = currentCycleId(resetDay, nowDate)
-    const kvKey = trafficCycleKvKey(cycleId)
-
-    const raw = await call('kv_get_value', { namespace: row.uuid, key: kvKey }, token).catch(() => null)
-    const current = parseRecord(raw, cycleId) ?? createRecord(row, cycleId, now)
-    const next = advanceRecord(current, row, now)
-
-    await call('kv_set_value', {
-      namespace: row.uuid,
-      key: kvKey,
-      value: JSON.stringify(next),
-    }, token)
-    updated++
+    targets.push({ row, cycleId, cycleKey: trafficCycleKvKey(cycleId) })
+  }
+  if (!targets.length) {
+    return { updated: 0, total: uuids.length }
   }
 
-  return { updated, total: uuids.length }
+  // 旧记录批量读回：原先每台一次 kv_get_value 串行拉，节点一多就是几百次往返。
+  // 读失败一律往外抛、整轮不写：把读失败当成"没有记录"会拿当前计数器重建基线，
+  // 等于把所有机器已累计的用量清零。分片同理——单个巨型请求失败面太大。
+  const targetByUuid = new Map(targets.map(t => [t.row.uuid, t]))
+  for (let i = 0; i < targets.length; i += READ_CHUNK) {
+    const chunk = targets.slice(i, i + READ_CHUNK)
+    const storedRows = await call('kv_get_multi_value', {
+      namespace_key: chunk.flatMap(t => [
+        { namespace: t.row.uuid, key: t.cycleKey },
+        { namespace: t.row.uuid, key: TRAFFIC_WINDOW_KEY },
+      ]),
+    }, token)
+    // 靠记录结构认领（窗口有 day/month，周期桶有 cycleId），不依赖后端回显 KV key——
+    // 认不出来就等于丢基线，代价和读失败一样大
+    for (const r of storedRows || []) {
+      const t = r && r.namespace ? targetByUuid.get(r.namespace) : null
+      if (!t) continue
+      const windows = parseWindows(r.value)
+      if (windows.day || windows.month) {
+        t.windows = windows
+        continue
+      }
+      const cycle = parseRecord(r.value, t.cycleId)
+      if (cycle) t.cycleRecord = cycle
+    }
+  }
+
+  let updated = 0
+  await inBatches(targets, WRITE_CONCURRENCY, async ({ row, cycleId, cycleKey, cycleRecord, windows }) => {
+    const nextCycle = advanceRecord(cycleRecord ?? createRecord(row, cycleId, now), row, now)
+
+    const prev = windows || {}
+    const nextWindows = {
+      day: advanceWindow(prev.day, dayId, row, now),
+      month: advanceWindow(prev.month, monthId, row, now),
+    }
+
+    await Promise.all([
+      call('kv_set_value', {
+        namespace: row.uuid,
+        key: cycleKey,
+        value: JSON.stringify(nextCycle),
+      }, token),
+      call('kv_set_value', {
+        namespace: row.uuid,
+        key: TRAFFIC_WINDOW_KEY,
+        value: JSON.stringify(nextWindows),
+      }, token),
+    ])
+    updated++
+  })
+
+  return { updated, total: uuids.length, dayId, monthId }
 }
 
 export default {

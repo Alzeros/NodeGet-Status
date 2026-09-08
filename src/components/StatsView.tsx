@@ -7,6 +7,7 @@ import { remainingDays } from '../utils/cost'
 import { cn, loadColor } from '../utils/cn'
 import { Flag } from './Flag'
 import { currencyCode, convert, getUsdRates } from '../utils/currency'
+import { localDateId, localMonthId } from '../utils/trafficCycle'
 import type { Node } from '../types'
 import type { NodeStatusCategory } from '../utils/stableStatus'
 
@@ -33,6 +34,49 @@ const METRICS: { key: Metric; label: string }[] = [
   { key: 'disk', label: '磁盘' },
   { key: 'bandwidth', label: '带宽' },
 ]
+
+/*
+ * 流量榜的四个口径。前两个是"共享时间窗"——每台机器统计的是同一个自然日/自然月，
+ * 榜单横向可比；后两个来自各自的计费周期：
+ *   cycle    看额度用了多少（可比性差：各家重置日不同，有的刚过 3 天有的已 28 天）
+ *   cycleAvg 把周期用量摊成日均，抹掉周期长短差异，也能横向比
+ * today/month 依赖主控采样 worker 写 metadata_traffic_window，cycle/cycleAvg 用老数据即可。
+ */
+type TrafficMode = 'today' | 'month' | 'cycle' | 'cycleAvg'
+
+const TRAFFIC_MODES: {
+  key: TrafficMode
+  label: string
+  subtitle: string
+  note: string
+}[] = [
+  {
+    key: 'today',
+    label: '今日',
+    subtitle: '自然日 · 跨机器可比',
+    note: '统计当天零点至今的上下行合计，所有机器同一时间窗',
+  },
+  {
+    key: 'month',
+    label: '当月',
+    subtitle: '自然月 · 跨机器可比',
+    note: '统计本月 1 号至今的上下行合计，不看各家计费重置日',
+  },
+  {
+    key: 'cycle',
+    label: '本周期',
+    subtitle: '按各自计费周期累计',
+    note: '各机器重置日不同，周期已走的天数也不同——看额度用量准，横向比大小不准',
+  },
+  {
+    key: 'cycleAvg',
+    label: '周期日均',
+    subtitle: '周期用量 ÷ 已统计天数',
+    note: '把周期用量摊成每天多少，抹掉周期长短差异后再比',
+  },
+]
+
+const DAY_MS = 86400000
 
 function Card({
   title,
@@ -282,22 +326,55 @@ export function StatsView({ nodes, statuses, showSource }: Props) {
   // 带宽榜的进度条按最大值归一；CPU/内存/磁盘天然是 0~100
   const metricMax = Math.max(...metricData.map(d => d.value), 1)
 
-  const trafficData = useMemo(
-    () =>
-      visible
-        .map(n => ({
-          name: nodeLabel(n, showSource),
-          region: regionOf(n),
-          value: n.monthlyTraffic?.total ?? 0,
-          received: n.monthlyTraffic?.received ?? 0,
-          transmitted: n.monthlyTraffic?.transmitted ?? 0,
-        }))
-        .filter(d => d.value > 0)
-        .sort((a, b) => b.value - a.value)
-        .slice(0, TOP_N),
-    [visible, showSource],
+  // 窗口数据是否已就位，决定默认口径——worker 没更新时不该默认停在一张空榜上。
+  // 不用 effect 纠正 state：数据晚到时这里自然重算，用户点过则以 trafficPick 为准
+  const hasWindow = useMemo(
+    () => ({
+      today: visible.some(n => n.dailyTraffic),
+      month: visible.some(n => n.calendarMonthTraffic),
+    }),
+    [visible],
   )
+  const [trafficPick, setTrafficPick] = useState<TrafficMode | null>(null)
+  const trafficMode: TrafficMode = trafficPick ?? (hasWindow.today ? 'today' : 'cycle')
+  const trafficMeta = TRAFFIC_MODES.find(m => m.key === trafficMode) ?? TRAFFIC_MODES[0]
+
+  const trafficData = useMemo(() => {
+    const now = Date.now()
+    const rows: { name: string; region: string | null; value: number }[] = []
+    for (const n of visible) {
+      const bucket =
+        trafficMode === 'today'
+          ? n.dailyTraffic
+          : trafficMode === 'month'
+            ? n.calendarMonthTraffic
+            : n.monthlyTraffic
+      if (!bucket) continue
+      let value = bucket.total
+      if (trafficMode === 'cycleAvg') {
+        // 分母取这份记录实际累计的时长，而不是周期总长——worker 中途上线时也算得对。
+        // 不足 1 小时的新记录按 1 小时算，免得外推出天文数字
+        value = bucket.total / (Math.max(now - bucket.startedAt, 3600_000) / DAY_MS)
+      }
+      if (value <= 0) continue
+      rows.push({ name: nodeLabel(n, showSource), region: regionOf(n), value })
+    }
+    rows.sort((a, b) => b.value - a.value)
+    return rows.slice(0, TOP_N)
+  }, [visible, showSource, trafficMode])
   const trafficMax = Math.max(...trafficData.map(d => d.value), 1)
+
+  // 窗口 id 由主控写定，明示出来：主控与访客不同时区时，"今日"指的是主控的今日
+  const trafficWindowNote = useMemo(() => {
+    if (trafficMode !== 'today' && trafficMode !== 'month') return ''
+    const id =
+      trafficMode === 'today'
+        ? visible.find(n => n.dailyTraffic)?.dailyTraffic?.cycleId
+        : visible.find(n => n.calendarMonthTraffic)?.calendarMonthTraffic?.cycleId
+    if (!id) return ''
+    const local = trafficMode === 'today' ? localDateId() : localMonthId()
+    return id === local ? `统计窗口 ${id}` : `统计窗口 ${id}（主控本地时区）`
+  }, [visible, trafficMode])
 
   // 价格榜：scaleDays 决定展示折算（本周期=整期价格，日均/周均按日成本折算）
   // 汇率：确定主币种（本周期花费占比最高的币种），拉取 USD 基准汇率做交叉折算
@@ -357,12 +434,14 @@ export function StatsView({ nodes, statuses, showSource }: Props) {
   }, [visible, fx, targetCurrency])
 
   const expireBuckets = useMemo(() => {
+    // 色板与排序理由见 global.css 的 --expire-*（暖=紧急 → 冷=安全，按相邻区分度定序）。
+    // 颜色绑在桶上而不是绑在过滤后的下标上——空桶被 filter 掉时不能让剩下的重新上色
     const buckets = [
-      { label: '已过期', min: -Infinity, max: 0, count: 0, color: '#e06b63' },
-      { label: '7天内', min: 1, max: 7, count: 0, color: '#dba54a' },
-      { label: '8~30天', min: 8, max: 30, count: 0, color: '#1a72d1' },
-      { label: '31~90天', min: 31, max: 90, count: 0, color: '#3ecc79' },
-      { label: '90天以上', min: 91, max: Infinity, count: 0, color: '#8b5cf6' },
+      { label: '已过期', min: -Infinity, max: 0, count: 0, color: 'var(--expire-1)' },
+      { label: '7天内', min: 1, max: 7, count: 0, color: 'var(--expire-2)' },
+      { label: '8~30天', min: 8, max: 30, count: 0, color: 'var(--expire-3)' },
+      { label: '31~90天', min: 31, max: 90, count: 0, color: 'var(--expire-4)' },
+      { label: '90天以上', min: 91, max: Infinity, count: 0, color: 'var(--expire-5)' },
     ]
     let withExpire = 0
     const expiring30: { name: string; region: string | null; days: number }[] = []
@@ -557,11 +636,31 @@ export function StatsView({ nodes, statuses, showSource }: Props) {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-5 gap-4">
-        {/* 周期流量榜 */}
-        <Card title="周期流量排行" subtitle={`Top ${TOP_N} · 按计费周期累计`} className="xl:col-span-3">
+        {/* 流量榜：自然日/自然月/计费周期/周期日均 四个口径切换 */}
+        <Card title="流量排行" subtitle={`Top ${TOP_N} · ${trafficMeta.subtitle}`} className="xl:col-span-3">
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {TRAFFIC_MODES.map(m => (
+              <button
+                key={m.key}
+                type="button"
+                onClick={() => setTrafficPick(m.key)}
+                className={cn(
+                  'px-2.5 py-1 text-xs rounded-full border border-transparent transition-all duration-200',
+                  trafficMode === m.key
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'bg-secondary/40 text-foreground/80 hover:bg-secondary/80',
+                )}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
           {trafficData.length === 0 ? (
-            <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground py-12">
-              暂无流量数据
+            <div className="flex-1 flex items-center justify-center text-center text-sm text-muted-foreground py-12 px-4">
+              {(trafficMode === 'today' && !hasWindow.today) ||
+              (trafficMode === 'month' && !hasWindow.month)
+                ? '该口径需要主控的流量采样 Worker 写入自然日/自然月窗口（scripts/monthly-traffic-worker.js），更新 Worker 后从那时起累计'
+                : '暂无流量数据'}
             </div>
           ) : (
             <div className="flex flex-col gap-2">
@@ -572,17 +671,20 @@ export function StatsView({ nodes, statuses, showSource }: Props) {
                   label={d.name}
                   region={d.region}
                   barPct={(d.value / trafficMax) * 100}
-                  barClass="bg-amber-500"
-                  valueText={bytes(d.value)}
+                  // 主题色而非琥珀：琥珀在本项目是保留的警告色（loadColor 70~90%、
+                  // 到期"7天内"桶、状态汇总的"注意"），用在纯量级榜单上是挪用语义。
+                  // 与资源榜"带宽"档同色——两者是同一种编码任务（字节量级，无状态含义）
+                  barClass="bg-primary"
+                  valueText={trafficMode === 'cycleAvg' ? `${bytes(d.value)}/天` : bytes(d.value)}
                 />
               ))}
             </div>
           )}
-          {trafficData.length > 0 && (
-            <div className="text-[10px] text-muted-foreground/70 mt-3">
-              条长相对榜首归一
-            </div>
-          )}
+          <div className="text-[10px] text-muted-foreground/70 mt-3">
+            {trafficMeta.note}
+            {trafficData.length > 0 && ' · 条长相对榜首归一'}
+            {trafficWindowNote && ` · ${trafficWindowNote}`}
+          </div>
         </Card>
 
         {/* 到期分布：堆叠条 + 图例 + 状态汇总 */}
@@ -593,14 +695,20 @@ export function StatsView({ nodes, statuses, showSource }: Props) {
             </div>
           ) : (
             <div>
-              {/* 堆叠条：一段一桶，宽度按占比 */}
-              <div className="flex h-3 rounded-full overflow-hidden bg-muted/80">
+              {/* 堆叠条：一段一桶，宽度按占比。
+                  段间留 2px 卡片底色：色相相邻时缝隙能划清边界，也是亮色下
+                  琥珀/青绿低于 3:1 时要求的辅助编码之一。
+                  百分比宽度加 gap 会溢出，交给 flex 默认的按比例收缩吸收 */}
+              <div className="flex h-3 gap-0.5 rounded-full overflow-hidden bg-muted/80">
                 {expireBuckets.buckets.map(b => (
                   <div
                     key={b.label}
                     className="h-full transition-all duration-500"
                     style={{
                       width: `${(b.count / expireBuckets.withExpire) * 100}%`,
+                      // 只有 1 台的桶占比不到 3%，会被压成看不见的窄缝、还被外圈圆角吃掉半截——
+                      // 而"7天内"恰恰是最该被看见的那个。给个下限，失真不到 1%
+                      minWidth: '6px',
                       backgroundColor: b.color,
                     }}
                     title={`${b.label} ${b.count} 台`}

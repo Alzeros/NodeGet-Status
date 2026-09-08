@@ -97,9 +97,18 @@ export interface Node {
   dynamic: DynamicSummary | null
   history: HistorySample[]
   monthlyTraffic?: MonthlyTraffic
+  /**
+   * 自然日窗口用量（今日）。与 monthlyTraffic 同结构，cycleId 存窗口 id（YYYY-MM-DD）。
+   * 窗口 id 由主控 worker 写定，所以这里是"主控本地时区的今天"。
+   * 需要主控的采样 worker 支持 metadata_traffic_window，否则为 undefined。
+   */
+  dailyTraffic?: MonthlyTraffic
+  /** 自然月窗口用量（当月）。同上，cycleId 存 YYYY-MM。 */
+  calendarMonthTraffic?: MonthlyTraffic
 }
 
 export interface MonthlyTraffic {
+  /** 窗口标识：计费周期桶存周期起始日，自然日/自然月桶存 YYYY-MM-DD / YYYY-MM */
   cycleId: string
   received: number
   transmitted: number
