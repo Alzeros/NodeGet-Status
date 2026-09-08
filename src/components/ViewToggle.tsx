@@ -1,4 +1,4 @@
-import { Columns2, Globe, LayoutGrid } from 'lucide-react'
+import { BarChart3, Columns2, Globe, LayoutGrid } from 'lucide-react'
 import { type ReactNode } from 'react'
 import type { View } from '../types'
 
@@ -6,6 +6,7 @@ const ITEMS: { value: View; label: string; icon: typeof LayoutGrid }[] = [
   { value: 'cards', label: '卡片', icon: LayoutGrid },
   { value: 'console', label: '工作台', icon: Columns2 },
   { value: 'map', label: '地图', icon: Globe },
+  { value: 'stats', label: '分析', icon: BarChart3 },
   // { value: 'mini', label: '迷你', icon: LayoutList },
   // { value: 'table', label: '表格', icon: Table },
 ]

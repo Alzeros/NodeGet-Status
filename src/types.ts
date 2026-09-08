@@ -169,7 +169,7 @@ export interface TaskQueryCondition {
   last?: null
 }
 
-export type View = 'cards' | 'console' | 'mini' | 'table' | 'map'
+export type View = 'cards' | 'console' | 'mini' | 'table' | 'map' | 'stats'
 
 export type SortDir = 'asc' | 'desc'
 

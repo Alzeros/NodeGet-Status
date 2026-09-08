@@ -12,6 +12,7 @@ import { MiniCard } from './components/MiniCard'
 import { NodeTable } from './components/NodeTable'
 import { NodeDetail } from './components/NodeDetail'
 import { ConsoleView } from './components/ConsoleView'
+import { StatsView } from './components/StatsView'
 import { NodeCardSkeletonGrid } from './components/NodeCardSkeleton'
 import { TagFilter } from './components/TagFilter'
 import { RegionFilter } from './components/RegionFilter'
@@ -674,6 +675,13 @@ export function App() {
                   </div>
                 )} */}
                 {/* {hasResults && view === 'table' && <NodeTable nodes={list} onOpen={setSelected} statuses={stableStatuses} counters={stableCounters} />} */}
+                {hasResults && !hydrating && view === 'stats' && (
+                  <StatsView
+                    nodes={list}
+                    statuses={stableStatuses}
+                    showSource={(config.site_tokens?.length ?? 0) > 1}
+                  />
+                )}
                 {hasResults && !hydrating && view === 'map' && (
                   <Suspense
                     fallback={
