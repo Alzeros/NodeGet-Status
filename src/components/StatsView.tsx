@@ -430,9 +430,9 @@ export function StatsView({ nodes, statuses, showSource }: Props) {
         />
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 xl:grid-cols-5 gap-4">
         {/* 资源占用榜：CPU/内存/磁盘/带宽 四个维度切换 */}
-        <Card title="资源占用排行" subtitle={`Top ${TOP_N} · 实时`} className="xl:col-span-2">
+        <Card title="资源占用排行" subtitle={`Top ${TOP_N} · 实时`} className="xl:col-span-3">
           <div className="flex flex-wrap gap-1.5 mb-3">
             {METRICS.map(m => (
               <button
@@ -477,7 +477,7 @@ export function StatsView({ nodes, statuses, showSource }: Props) {
         {/* 成本榜：钱花在哪（月均，跨周期可比）+ 花得值不值（剩余量）。
             不画花费进度条：金额已降序排列，条长只是把右边的数字重复一遍，
             且 Top 10 金额接近时条长全挤在 85%~100%，零信息量。 */}
-        <Card title="成本排行" subtitle="月均花费 · 按金额降序">
+        <Card title="成本排行" subtitle="月均花费 · 按金额降序" className="xl:col-span-2">
           {priceData.length === 0 ? (
             <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground py-12">
               {fx ? '未配置价格的节点' : '正在获取汇率…'}
@@ -556,9 +556,9 @@ export function StatsView({ nodes, statuses, showSource }: Props) {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 xl:grid-cols-5 gap-4">
         {/* 周期流量榜 */}
-        <Card title="周期流量排行" subtitle={`Top ${TOP_N} · 按计费周期累计`} className="xl:col-span-2">
+        <Card title="周期流量排行" subtitle={`Top ${TOP_N} · 按计费周期累计`} className="xl:col-span-3">
           {trafficData.length === 0 ? (
             <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground py-12">
               暂无流量数据
@@ -586,7 +586,7 @@ export function StatsView({ nodes, statuses, showSource }: Props) {
         </Card>
 
         {/* 到期分布：堆叠条 + 图例 + 状态汇总 */}
-        <Card title="到期与状态" subtitle={expireBuckets.withExpire === 0 ? '未设置到期时间' : '按剩余天数分桶'}>
+        <Card title="到期与状态" subtitle={expireBuckets.withExpire === 0 ? '未设置到期时间' : '按剩余天数分桶'} className="xl:col-span-2">
           {expireBuckets.withExpire === 0 ? (
             <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground py-12">
               节点均未设置到期时间
