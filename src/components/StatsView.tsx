@@ -188,6 +188,8 @@ function RankBadge({ rank }: { rank: number }) {
 /**
  * 排行榜行：排名 + 国旗 + 名称 + 内嵌进度条 + 右对齐数值。
  * barPct 传 0~100；barClass 决定进度条颜色（百分比指标用 loadColor，其余用主题色）。
+ * 布局用 grid：名称列 minmax(0,1fr) 自动吃剩余空间（窄屏收、宽屏放），
+ * 数值列固定宽。之前的定宽 flex 方案在窄屏溢出、宽屏拖尾。
  */
 function RankRow({
   rank,
@@ -207,19 +209,22 @@ function RankRow({
   dim?: boolean
 }) {
   return (
-    <div className={cn('flex items-center gap-2.5 group', dim && 'opacity-45')}>
+    <div
+      className={cn('grid items-center gap-2 group', dim && 'opacity-45')}
+      style={{ gridTemplateColumns: '1.25rem minmax(0, 1fr) 3.5rem 4.5rem' }}
+    >
       <RankBadge rank={rank} />
-      <span className="w-36 sm:w-44 shrink-0 flex items-center gap-1.5 text-xs" title={label}>
+      <span className="flex items-center gap-1.5 text-xs min-w-0" title={label}>
         {region && <Flag code={region} className="shrink-0" />}
         <span className="truncate">{label}</span>
       </span>
-      <div className="flex-1 h-1.5 rounded-full bg-muted/80 overflow-hidden">
+      <div className="h-1.5 rounded-full bg-muted/80 overflow-hidden">
         <div
           className={cn('h-full rounded-full transition-all duration-500', barClass)}
           style={{ width: `${Math.min(100, Math.max(barPct, barPct > 0 ? 2 : 0))}%` }}
         />
       </div>
-      <span className="w-16 sm:w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+      <span className="text-right text-xs tabular-nums text-muted-foreground">
         {valueText}
       </span>
     </div>
@@ -563,16 +568,17 @@ export function StatsView({ nodes, statuses, showSource }: Props) {
             </div>
           ) : (
             <>
-              {/* 表头：列语义显式化。列全部左排紧凑布局，空白统一留行尾 */}
-              <div className="flex items-center gap-2.5 text-[10px] text-muted-foreground/70 mb-1.5">
-                <span className="w-5 shrink-0" />
-                <span className="w-36 sm:w-44 shrink-0">节点</span>
-                <span className="shrink-0 w-12 text-right" title="本周期剩余流量 ÷ 额度">
-                  流量剩余
+              {/* 表头：grid 列定义与数据行一致（1.25rem/1fr/3.5rem/5rem），天然对齐 */}
+              <div
+                className="grid items-center gap-2 text-[10px] text-muted-foreground/70 mb-1.5"
+                style={{ gridTemplateColumns: '1.25rem minmax(0, 1fr) 3.5rem 5rem' }}
+              >
+                <span />
+                <span>节点</span>
+                <span className="text-right" title="本周期剩余流量 ÷ 额度">
+                  剩余
                 </span>
-                <span className="shrink-0 w-16 sm:w-20 text-right">
-                  月均（占总支出）
-                </span>
+                <span className="text-right">月均（占比）</span>
               </div>
               <div className="flex flex-col gap-2 flex-1">
                 {priceData.slice(0, TOP_N).map((d, i) => {
@@ -580,13 +586,17 @@ export function StatsView({ nodes, statuses, showSource }: Props) {
                   const share = monthlyCost.total > 0 ? (d.monthlyCost / monthlyCost.total) * 100 : 0
                   const r = d.remaining
                   return (
-                    <div key={d.name} className="flex items-center gap-2.5">
+                    <div
+                      key={d.name}
+                      className="grid items-center gap-2"
+                      style={{ gridTemplateColumns: '1.25rem minmax(0, 1fr) 3.5rem 5rem' }}
+                    >
                       <RankBadge rank={i + 1} />
-                      <span className="w-36 sm:w-44 shrink-0 flex items-center gap-1.5 text-xs" title={d.name}>
+                      <span className="flex items-center gap-1.5 text-xs min-w-0" title={d.name}>
                         {d.region && <Flag code={d.region} className="shrink-0" />}
                         <span className="truncate">{d.name}</span>
                       </span>
-                      <span className="shrink-0 w-12 flex justify-end">
+                      <span className="flex justify-end">
                         {/* 剩余徽章：剩得少才是要警惕的（快超量/可能被刷），绿=余量充足是常态 */}
                         {r != null ? (
                           <span
@@ -609,7 +619,7 @@ export function StatsView({ nodes, statuses, showSource }: Props) {
                         )}
                       </span>
                       <span
-                        className="shrink-0 text-xs tabular-nums font-semibold w-16 sm:w-20 text-right"
+                        className="text-xs tabular-nums font-semibold text-right whitespace-nowrap"
                         title={
                           currencyCode(d.originalUnit) === targetCurrency
                             ? `${d.originalUnit}${d.originalPrice.toFixed(2)} / ${d.originalCycle}天`
