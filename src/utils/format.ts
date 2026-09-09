@@ -1,12 +1,20 @@
 import prettyBytes from 'pretty-bytes'
 
+const GiB = 1024 ** 3
+
 /**
  * `precise` 只在全局汇总处开：1–10 TiB 区间保留 4 位有效数字（如 1.235 TiB），
  * 便于观察日增长。卡片等空间紧张处不要开——1 TiB 会被撑成 "1.000 TiB"，白白多吃三个字符。
+ *
+ * GiB 段（≥1 GiB 且 <1 TiB）不走 prettyBytes：它固定 3 位有效数字，
+ * 四位数的 GiB 值（1000~1023）会被压到 10 GiB 粒度——1013 显示 1010、
+ * 涨过 1015 直接跳 1020，主数字与 ↑↓ 分项加总永远差好几个 G。
+ * 这里直接舍弃小数取整 GiB，粒度 1 GiB，分项相加与主数字最多差 1。
  */
 function formatBytes(n: number, precise = false) {
   const t = 1024 ** 4
   if (precise && n >= t && n < 10 * t) return `${(n / t).toPrecision(4)} TiB`
+  if (precise && n >= GiB) return `${Math.floor(n / GiB)} GiB`
   return prettyBytes(n, { binary: true })
 }
 
