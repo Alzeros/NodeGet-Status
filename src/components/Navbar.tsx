@@ -3,6 +3,7 @@ import { Search as SearchIcon, X } from 'lucide-react'
 import { Search } from './Search'
 import { ViewToggle } from './ViewToggle'
 import { ThemeToggle } from './ThemeToggle'
+import { StyleMenu } from './StyleMenu'
 import { SortMenu } from './SortMenu'
 import { Button } from './ui/button'
 import type { Sort, SortDir, View } from '../types'
@@ -71,6 +72,7 @@ export function Navbar({ siteName, logo, query, onQuery, view, onView, sort, sor
           </Button>
           <SortMenu value={sort} dir={sortDir} onChange={onSort} />
           <ViewToggle value={view} onChange={onView} />
+          <StyleMenu />
           <ThemeToggle />
         </div>
       </div>

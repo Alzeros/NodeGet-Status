@@ -13,6 +13,10 @@
         if (isDark) {
           document.documentElement.classList.add('dark')
         }
+        var s = localStorage.getItem('nodeget.style')
+        if (s === 'neu' || s === 'term' || s === 'paper') {
+          document.documentElement.dataset.style = s
+        }
       } catch (_) {}
     </script>
     <link rel="stylesheet" href="./custom.css" />

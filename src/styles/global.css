@@ -272,3 +272,271 @@
   .dark .ring-amber-500\/25 { --tw-ring-color: rgba(201, 146, 62, 0.25) !important; }
   .dark .ring-rose-500\/25 { --tw-ring-color: rgba(194, 93, 86, 0.25) !important; }
 }
+
+/* ============ 风格主题：新拟物（data-style="neu"） ============
+   与 .dark 明暗模式正交。选择器一律以 html[data-style='neu'] 开头：
+    specificity (0,2,1) 压过 .dark .card-soft 的 (0,2,0)，且必须写在
+   原规则之后。新拟物的两条公理，改这里之前先读：
+   1) 卡片底色 == 页面底色，形体完全由双向投影（暗角+亮角）塑造；
+      玻璃拟态的 backdrop-filter 和描边必须关掉，否则浮雕感被毁。
+   2) 背景必须哑光平涂，彩色柔光（默认主题的三层 radial-gradient）
+      会让凸起投影失去参照，只留同色系极浅晕光。 */
+html[data-style='neu'] {
+  --background: 40 18% 90%; /* 暖米灰：与默认主题的冷灰蓝拉开色相距离 */
+  --card: 40 18% 90%; /* 公理 1：与背景同色 */
+  --popover: 40 18% 90%;
+  --secondary: 40 16% 86%;
+  --muted: 40 16% 86%;
+  --muted-foreground: 40 8% 42%;
+  --accent: 40 16% 84%;
+  --border: 40 14% 81%;
+  --input: 40 14% 81%;
+  --radius: 1.5rem;
+  /* 双向投影的两个光源色，亮/暗主题各自调。
+     亮部要"贴边勾线"而非"外放发光"：偏移/模糊一大，白色高光就脱离卡片
+     糊在背景上，侧边栏这种纵向堆叠处会叠成一整片白斑。 */
+  --neu-dark: rgba(186, 170, 148, 0.55);
+  --neu-light: rgba(255, 255, 255, 0.4);
+}
+html[data-style='neu'].dark {
+  --background: 35 9% 15%;
+  --card: 35 9% 15%;
+  --popover: 35 9% 15%;
+  --secondary: 35 8% 19%;
+  --muted: 35 8% 19%;
+  --muted-foreground: 35 8% 60%;
+  --accent: 35 8% 21%;
+  --border: 35 8% 21%;
+  --input: 35 8% 21%;
+  --neu-dark: rgba(0, 0, 0, 0.6);
+  --neu-light: rgba(255, 255, 255, 0.05);
+}
+
+html[data-style='neu'] .bg-soft {
+  background-color: hsl(var(--background));
+  background-image:
+    radial-gradient(100rem 70rem at 50% -20%, rgba(255, 255, 255, 0.18), transparent 55%);
+}
+html[data-style='neu'].dark .bg-soft {
+  background-image:
+    radial-gradient(100rem 70rem at 50% -20%, rgba(255, 255, 255, 0.05), transparent 55%);
+}
+
+/* 凸起卡：玻璃/实心两种卡在 neu 下合并为同一种表达 */
+html[data-style='neu'] .card-soft,
+html[data-style='neu'] .card-flat {
+  background-color: hsl(var(--card));
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: none !important;
+  border-radius: calc(var(--radius) + 0.375rem);
+  box-shadow:
+    6px 6px 14px var(--neu-dark),
+    -6px -6px 14px var(--neu-light);
+}
+html[data-style='neu'] .card-soft:hover,
+html[data-style='neu'] .card-flat:hover {
+  background-color: hsl(var(--card));
+  border-color: transparent !important;
+  box-shadow:
+    9px 9px 20px var(--neu-dark),
+    -9px -9px 20px var(--neu-light);
+  transform: translateY(-2px);
+}
+
+/* 细hairline分隔线在 neu 的哑光底上是视觉噪音，抹掉 */
+html[data-style='neu'] .border-\[\#f0f0f0\],
+html[data-style='neu'] .dark\:border-border\/20 {
+  border-color: transparent;
+}
+
+/* 凹槽件：进度条轨道、筛选 chip、视图切换器底座等"嵌进底面"的元素。
+   bg-secondary/40 是 chip 专用，bg-muted / bg-muted\/80 是轨道与切换器底座。 */
+html[data-style='neu'] .bg-secondary\/40,
+html[data-style='neu'] .bg-muted,
+html[data-style='neu'] .bg-muted\/80 {
+  box-shadow:
+    inset 3px 3px 6px var(--neu-dark),
+    inset -3px -3px 6px var(--neu-light);
+}
+
+/* 导航栏 outline 按钮：去掉描边，改成凸起 */
+html[data-style='neu'] .border-input {
+  border-color: transparent;
+  box-shadow:
+    4px 4px 8px var(--neu-dark),
+    -4px -4px 8px var(--neu-light);
+}
+
+/* ============ 风格主题：终端（data-style="term"） ============
+   差异在字体与视觉语言层：等宽字体、直角、描边卡、网格/扫描线背景。
+   终端的灵魂是"单色荧光"——前景文字本身带绿，不是中性灰白；
+   暗色 = 磷光 CRT，亮色 = 老式 LCD（淡青绿底深墨绿字，别做成米色，会撞纸质风）。 */
+html[data-style='term'] {
+  --background: 105 14% 80%; /* LCD 淡青绿 */
+  --foreground: 135 35% 13%; /* 深墨绿字 */
+  --card: 105 14% 85%;
+  --card-foreground: 135 35% 13%;
+  --popover: 105 14% 85%;
+  --popover-foreground: 135 35% 13%;
+  --primary: 145 70% 24%;
+  --primary-foreground: 105 14% 88%;
+  --secondary: 105 12% 76%;
+  --secondary-foreground: 135 35% 13%;
+  --muted: 105 12% 76%;
+  --muted-foreground: 120 10% 35%;
+  --accent: 105 12% 73%;
+  --accent-foreground: 135 35% 13%;
+  --border: 115 12% 58%;
+  --input: 115 12% 58%;
+  --ring: 145 70% 24%;
+  --radius: 0.25rem;
+}
+html[data-style='term'].dark {
+  --background: 120 20% 4%; /* 近黑带绿 */
+  --foreground: 120 32% 76%; /* 磷光绿字——终端味的关键 */
+  --card: 120 15% 7%;
+  --card-foreground: 120 32% 76%;
+  --popover: 120 15% 7%;
+  --popover-foreground: 120 32% 76%;
+  --primary: 130 75% 55%;
+  --primary-foreground: 120 20% 6%;
+  --secondary: 120 12% 12%;
+  --secondary-foreground: 120 32% 76%;
+  --muted: 120 12% 12%;
+  --muted-foreground: 120 15% 48%;
+  --accent: 120 12% 14%;
+  --accent-foreground: 120 32% 76%;
+  --border: 120 20% 18%;
+  --input: 120 20% 18%;
+  --ring: 130 75% 55%;
+}
+
+/* 等宽字体是终端风的主体表达；CJK 字形回退到系统中文字体 */
+html[data-style='term'] body {
+  font-family:
+    'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas,
+    'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', monospace;
+}
+
+html[data-style='term'] .bg-soft {
+  background-color: hsl(var(--background));
+  background-image:
+    linear-gradient(hsl(var(--foreground) / 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(var(--foreground) / 0.045) 1px, transparent 1px);
+  background-size: 32px 32px;
+  background-attachment: fixed;
+}
+html[data-style='term'].dark .bg-soft {
+  background-image:
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.3) 0 1px, transparent 1px 3px),
+    linear-gradient(hsl(var(--primary) / 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(var(--primary) / 0.06) 1px, transparent 1px);
+  background-size: auto, 32px 32px, 32px 32px;
+}
+
+/* CRT 余辉：整页文字带一层极淡的绿晕，小字号不至于糊 */
+html[data-style='term'].dark body {
+  text-shadow: 0 0 6px hsl(var(--primary) / 0.15);
+}
+
+/* 卡片：描边 + 直角 + 无投影；悬浮变成荧光描边和微光晕 */
+html[data-style='term'] .card-soft,
+html[data-style='term'] .card-flat {
+  background-color: hsl(var(--card));
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid hsl(var(--border)) !important;
+  border-radius: var(--radius);
+  box-shadow: none;
+}
+html[data-style='term'] .card-soft:hover,
+html[data-style='term'] .card-flat:hover {
+  background-color: hsl(var(--card));
+  border-color: hsl(var(--primary) / 0.6) !important;
+  box-shadow:
+    0 0 0 1px hsl(var(--primary) / 0.25),
+    0 0 18px hsl(var(--primary) / 0.12);
+  transform: none;
+}
+
+/* 暗色下主色文字带一点磷光 */
+html[data-style='term'].dark .text-primary {
+  text-shadow: 0 0 8px hsl(var(--primary) / 0.45);
+}
+
+/* ============ 风格主题：杂志·纸质（data-style="paper"） ============
+   编辑排版语言：衬线字体、纸面底、细线框、零阴影。
+   亮色 = 米色纸 + 深朱红（oxblood）主色；暗色 = 墨夜纸 + 陶土红。 */
+html[data-style='paper'] {
+  --background: 45 30% 94%; /* 米色纸 #f5f1e6 */
+  --foreground: 30 10% 12%;
+  --card: 46 35% 97%; /* 比纸面亮半档，像贴上去的卡片纸 */
+  --card-foreground: 30 10% 12%;
+  --popover: 46 35% 97%;
+  --popover-foreground: 30 10% 12%;
+  --primary: 8 60% 38%; /* 编辑风深朱红 */
+  --primary-foreground: 45 30% 95%;
+  --secondary: 45 20% 90%;
+  --secondary-foreground: 30 10% 12%;
+  --muted: 45 20% 90%;
+  --muted-foreground: 35 8% 42%;
+  --accent: 45 20% 88%;
+  --accent-foreground: 30 10% 12%;
+  --border: 40 15% 78%;
+  --input: 40 15% 78%;
+  --ring: 8 60% 38%;
+  --radius: 0.125rem;
+}
+html[data-style='paper'].dark {
+  --background: 30 8% 10%;
+  --foreground: 40 15% 88%;
+  --card: 30 8% 13%;
+  --card-foreground: 40 15% 88%;
+  --popover: 30 8% 13%;
+  --popover-foreground: 40 15% 88%;
+  --primary: 10 55% 62%; /* 暗底上深红发闷，换陶土红 */
+  --primary-foreground: 30 10% 10%;
+  --secondary: 30 7% 17%;
+  --secondary-foreground: 40 15% 88%;
+  --muted: 30 7% 17%;
+  --muted-foreground: 35 8% 58%;
+  --accent: 30 7% 19%;
+  --accent-foreground: 40 15% 88%;
+  --border: 35 8% 24%;
+  --input: 35 8% 24%;
+  --ring: 10 55% 62%;
+}
+
+/* 衬线是纸质风的主体表达；CJK 走宋体族，等宽场景（font-mono）不受影响 */
+html[data-style='paper'] body {
+  font-family:
+    Georgia, 'Times New Roman', 'Songti SC', 'Noto Serif CJK SC',
+    'Noto Serif SC', 'SimSun', serif;
+}
+
+/* 笔记本横线纹：极淡，只凑近才看得出 */
+html[data-style='paper'] .bg-soft {
+  background-color: hsl(var(--background));
+  background-image:
+    repeating-linear-gradient(0deg, transparent 0 27px, hsl(var(--foreground) / 0.035) 27px 28px);
+  background-attachment: fixed;
+}
+
+/* 卡片：纸卡 + 1px 细线框，无投影无模糊；悬浮只是框线加深 */
+html[data-style='paper'] .card-soft,
+html[data-style='paper'] .card-flat {
+  background-color: hsl(var(--card));
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid hsl(var(--border)) !important;
+  border-radius: var(--radius);
+  box-shadow: none;
+}
+html[data-style='paper'] .card-soft:hover,
+html[data-style='paper'] .card-flat:hover {
+  background-color: hsl(var(--card));
+  border-color: hsl(var(--foreground) / 0.45) !important;
+  box-shadow: none;
+  transform: none;
+}
