@@ -89,3 +89,35 @@ export function daysUntilNextReset(resetDay: number, now: Date = new Date()) {
   // 不带空格：卡片里常在等宽字体旁边混排，多一个空格就可能把整行挤出可视区
   return days >= 1 ? `${days}天` : '不足1天'
 }
+
+/**
+ * 距下次重置的毫秒数（已重置或非法值返回 0）。
+ * 榜单要按紧迫度精确排序——"天"级粒度下剩 5 小时和剩 29 小时同为 0 天，排不出先后。
+ */
+export function msUntilNextReset(resetDay: number, now: Date = new Date()) {
+  const ms = nextResetTime(resetDay, now).getTime() - now.getTime()
+  return Number.isFinite(ms) && ms > 0 ? ms : 0
+}
+
+/**
+ * 倒计时文案，粒度随剩余时间收紧：
+ *   >3天    只给天数（剩 26 天还是 25 天，不影响"现在用不用"这个决策）
+ *   ≤3天    天 + 小时（开始影响"今天还来不来得及跑完"）
+ *   <24小时 小时
+ *   <1小时  分钟（降到分钟级才有紧迫感）
+ * 不带空格，理由同 daysUntilNextReset。
+ */
+export function resetCountdownLabel(ms: number) {
+  if (!Number.isFinite(ms) || ms <= 0) return '即将'
+  const minutes = Math.floor(ms / 60000)
+  if (minutes < 60) return `${Math.max(minutes, 1)}分钟`
+  const hours = Math.floor(ms / 3600000)
+  if (hours < 24) return `${hours}小时`
+  const days = Math.floor(hours / 24)
+  if (days <= 3) {
+    // 整天数就别缀"0小时"，读起来像噪声
+    const rest = hours % 24
+    return rest > 0 ? `${days}天${rest}小时` : `${days}天`
+  }
+  return `${days}天`
+}

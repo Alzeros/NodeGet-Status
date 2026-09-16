@@ -7,7 +7,7 @@ import { remainingDays } from '../utils/cost'
 import { cn, loadColor } from '../utils/cn'
 import { Flag } from './Flag'
 import { currencyCode, convert, getUsdRates } from '../utils/currency'
-import { localDateId, localMonthId } from '../utils/trafficCycle'
+import { currentCycleId, localDateId, localMonthId, msUntilNextReset, nextCycleStartId, resetCountdownLabel } from '../utils/trafficCycle'
 import type { Node } from '../types'
 import type { NodeStatusCategory } from '../utils/stableStatus'
 
@@ -169,6 +169,62 @@ function buildPriceData(
   // 按月均花费降序：钱花在哪一目了然
   rows.sort((a, b) => b.monthlyCost - a.monthlyCost)
   return rows
+}
+
+/**
+ * 流量重置榜行数据。回答的是"这几天该把大流量任务交给谁"：
+ *   倒计时 —— 距下次重置还有多久，越短说明额度越早作废（用不掉就白扔）
+ *   剩余额度 —— 还能跑多少，光快刷新但已经见底了也没法用
+ * 两个维度缺一不可，所以都要列出来，而不是只排倒计时。
+ */
+interface ResetRow {
+  name: string
+  region: string | null
+  ms: number               // 距下次重置的毫秒数，排序键
+  text: string             // 倒计时文案
+  freeBytes: number | null // 本周期剩余额度（字节），未设额度时 null
+  resetAt: string          // 下次重置日 YYYY-MM-DD
+  cycleRange: string       // 本周期区间 MM-DD ~ MM-DD
+  online: boolean
+}
+
+/** MM-DD，榜单/详情的周期区间用短格式 */
+function mmdd(id: string) {
+  return id.length >= 10 ? id.slice(5) : id
+}
+
+function buildResetData(visible: Node[], showSource: boolean, now: Date): ResetRow[] {
+  const rows: ResetRow[] = []
+  for (const n of visible) {
+    const meta = n.meta
+    const mt = n.monthlyTraffic
+    const limit = mt?.limit ?? (meta?.trafficLimit && meta.trafficLimit > 0 ? meta.trafficLimit : undefined)
+    // 不限量的机器没有"归零重算"这回事，倒计时对它毫无意义，直接排除
+    if (!limit || limit <= 0) continue
+    const resetDay = meta?.trafficResetDay ?? 1
+    const ms = msUntilNextReset(resetDay, now)
+    const billed = mt?.billed ?? 0
+    rows.push({
+      name: nodeLabel(n, showSource),
+      region: regionOf(n),
+      ms,
+      text: resetCountdownLabel(ms),
+      freeBytes: Math.max(0, limit - billed),
+      resetAt: nextCycleStartId(resetDay, now),
+      cycleRange: `${mmdd(currentCycleId(resetDay, now))} ~ ${mmdd(nextCycleStartId(resetDay, now))}`,
+      online: n.online,
+    })
+  }
+  // 快重置的在最前；离线的沉底——列了也用不上，别占住榜首位置
+  rows.sort((a, b) => (a.online === b.online ? a.ms - b.ms : a.online ? -1 : 1))
+  return rows
+}
+
+/** 倒计时紧迫度配色：与"到期"明细同一套语义（红=最近要处理，琥珀=一周内），弱化期用常规色 */
+function resetCountdownClass(ms: number) {
+  if (ms <= DAY_MS) return 'text-rose-600'
+  if (ms <= 3 * DAY_MS) return 'text-amber-600'
+  return 'text-foreground/80'
 }
 
 /** 排名徽章：前三名高亮，其余弱化 */
@@ -380,6 +436,28 @@ export function StatsView({ nodes, statuses, showSource }: Props) {
     const local = trafficMode === 'today' ? localDateId() : localMonthId()
     return id === local ? `统计窗口 ${id}` : `统计窗口 ${id}（主控本地时区）`
   }, [visible, trafficMode])
+
+  // 流量重置倒计时榜。只看"有额度"的机器，与窗口数据无关，所以不受 worker 是否更新影响
+  const resetRows = useMemo(
+    () => buildResetData(visible, showSource, new Date()),
+    [visible, showSource],
+  )
+  const resetStats = useMemo(() => {
+    let within3 = 0
+    let within7 = 0
+    for (const r of resetRows) {
+      if (r.ms <= 3 * DAY_MS) within3++
+      if (r.ms <= 7 * DAY_MS) within7++
+    }
+    return { within3, within7 }
+  }, [resetRows])
+  // 行数下限 TOP_N，上限不设：7 天内有几台就列几台。
+  // 副标题承诺了"7天内 N 台"，列表少于这个数就是自己打自己脸；多出来的行也就
+  // 6~7 天那么远，不会把真正紧急的那几台挤出视野。高度交给同行卡片对齐吸收。
+  const resetVisible = useMemo(
+    () => resetRows.slice(0, Math.max(TOP_N, resetStats.within7)),
+    [resetRows, resetStats.within7],
+  )
 
   // 价格榜：scaleDays 决定展示折算（本周期=整期价格，日均/周均按日成本折算）
   // 汇率：确定主币种（本周期花费占比最高的币种），拉取 USD 基准汇率做交叉折算
@@ -697,50 +775,130 @@ export function StatsView({ nodes, statuses, showSource }: Props) {
           </div>
         </Card>
 
-        {/* 到期分布：堆叠条 + 图例 + 状态汇总 */}
-        <Card title="到期与状态" subtitle={expireBuckets.withExpire === 0 ? '未设置到期时间' : '按剩余天数分桶'} className="xl:col-span-2">
+        {/* 流量刷新倒计时：回答"这几天把大流量任务交给谁"。
+            快重置（额度即将作废）+ 还有余额（吃得下）才是目标机器，两个维度都列出来，
+            但不合成"可用分数"——加权分会把判断依据藏起来，让人只能信一个来路不明的排名。
+            只按倒计时升序，离线的沉底。 */}
+        <Card
+          title="流量刷新倒计时"
+          subtitle={
+            resetRows.length === 0
+              ? '未设置流量额度'
+              : `3天内 ${resetStats.within3} 台 · 7天内 ${resetStats.within7} 台`
+          }
+          className="xl:col-span-2"
+        >
+          {resetRows.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center text-center text-sm text-muted-foreground py-12 px-4">
+              节点均未设置流量额度
+            </div>
+          ) : (
+            <>
+              {/* 表头：两个数值列（倒计时/剩余）不标名字，就会被当成同一件事 */}
+              <div
+                className="grid items-center gap-2 text-[10px] text-muted-foreground/70 mb-1.5"
+                style={{ gridTemplateColumns: '1.25rem minmax(0, 1fr) 4.5rem 4.5rem' }}
+              >
+                <span />
+                <span>节点</span>
+                <span className="text-right">倒计时</span>
+                <span className="text-right" title="额度 − 本周期已用">
+                  剩余
+                </span>
+              </div>
+              <div className="flex flex-col gap-2 flex-1">
+                {resetVisible.map((d, i) => (
+                  <div
+                    key={d.name}
+                    className={cn('grid items-center gap-2', !d.online && 'opacity-45')}
+                    style={{ gridTemplateColumns: '1.25rem minmax(0, 1fr) 4.5rem 4.5rem' }}
+                    title={`${d.name} · 周期 ${d.cycleRange} · ${d.resetAt} 00:00 重置`}
+                  >
+                    <RankBadge rank={i + 1} />
+                    <span className="flex items-center gap-1.5 text-xs min-w-0">
+                      {d.region && <Flag code={d.region} className="shrink-0" />}
+                      <span className="truncate">{d.name}</span>
+                    </span>
+                    <span
+                      className={cn(
+                        'text-right text-xs font-semibold tabular-nums whitespace-nowrap',
+                        resetCountdownClass(d.ms),
+                      )}
+                    >
+                      {d.text}
+                    </span>
+                    <span className="text-right text-[11px] tabular-nums text-muted-foreground whitespace-nowrap">
+                      {d.freeBytes != null ? bytes(d.freeBytes) : '—'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+          <div className="text-[10px] text-muted-foreground/70 mt-3">
+            按距下次重置升序，7 天内的机器全部列出（最少 10 行）· 红 = 24 小时内、琥珀 = 3 天内 · 剩余 = 额度 −
+            本周期已用
+          </div>
+        </Card>
+
+        {/* 到期分布：堆叠条 + 图例 + 30 天明细 + 状态汇总。
+            拆出"刷新倒计时"后这行只剩这一张卡，索性占满整行、内部在宽屏分两栏，
+            免得分桶条被拉成一条长带而明细挤在下面 */}
+        <Card
+          title="到期与状态"
+          subtitle={expireBuckets.withExpire === 0 ? '未设置到期时间' : '按剩余天数分桶'}
+          className="xl:col-span-5"
+        >
           {expireBuckets.withExpire === 0 ? (
             <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground py-12">
               节点均未设置到期时间
             </div>
           ) : (
-            <div>
-              {/* 堆叠条：一段一桶，宽度按占比。
-                  段间留 2px 卡片底色：色相相邻时缝隙能划清边界，也是亮色下
-                  琥珀/青绿低于 3:1 时要求的辅助编码之一。
-                  百分比宽度加 gap 会溢出，交给 flex 默认的按比例收缩吸收 */}
-              <div className="flex h-3 gap-0.5 rounded-full overflow-hidden bg-muted/80">
-                {expireBuckets.buckets.map(b => (
-                  <div
-                    key={b.label}
-                    className="h-full transition-all duration-500"
-                    style={{
-                      width: `${(b.count / expireBuckets.withExpire) * 100}%`,
-                      // 只有 1 台的桶占比不到 3%，会被压成看不见的窄缝、还被外圈圆角吃掉半截——
-                      // 而"7天内"恰恰是最该被看见的那个。给个下限，失真不到 1%
-                      minWidth: '6px',
-                      backgroundColor: b.color,
-                    }}
-                    title={`${b.label} ${b.count} 台`}
-                  />
-                ))}
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-x-10 gap-y-5">
+              {/* 左栏：分桶条 + 图例 */}
+              <div>
+                {/* 堆叠条：一段一桶，宽度按占比。
+                    段间留 2px 卡片底色：色相相邻时缝隙能划清边界，也是亮色下
+                    琥珀/青绿低于 3:1 时要求的辅助编码之一。
+                    百分比宽度加 gap 会溢出，交给 flex 默认的按比例收缩吸收 */}
+                <div className="flex h-3 gap-0.5 rounded-full overflow-hidden bg-muted/80">
+                  {expireBuckets.buckets.map(b => (
+                    <div
+                      key={b.label}
+                      className="h-full transition-all duration-500"
+                      style={{
+                        width: `${(b.count / expireBuckets.withExpire) * 100}%`,
+                        // 只有 1 台的桶占比不到 3%，会被压成看不见的窄缝、还被外圈圆角吃掉半截——
+                        // 而"7天内"恰恰是最该被看见的那个。给个下限，失真不到 1%
+                        minWidth: '6px',
+                        backgroundColor: b.color,
+                      }}
+                      title={`${b.label} ${b.count} 台`}
+                    />
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2 mt-4">
+                  {expireBuckets.buckets.map(b => (
+                    <div key={b.label} className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: b.color }} />
+                      <span className="text-xs text-muted-foreground flex-1">{b.label}</span>
+                      <span className="text-xs font-bold tabular-nums">{b.count}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-2 mt-4">
-                {expireBuckets.buckets.map(b => (
-                  <div key={b.label} className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: b.color }} />
-                    <span className="text-xs text-muted-foreground flex-1">{b.label}</span>
-                    <span className="text-xs font-bold tabular-nums">{b.count}</span>
+
+              {/* 右栏：30 天内到期明细，最紧急的在前（含已过期） */}
+              <div className="flex flex-col">
+                <div className="text-[11px] text-muted-foreground font-medium mb-2">
+                  30 天内到期 · {expireBuckets.expiring30.length} 台
+                </div>
+                {expireBuckets.expiring30.length === 0 ? (
+                  <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground py-6">
+                    30 天内无节点到期
                   </div>
-                ))}
-              </div>
-              {/* 30 天内到期明细：最紧急的在前，含已过期 */}
-              {expireBuckets.expiring30.length > 0 && (
-                <div className="mt-4 pt-3 border-t border-border/40">
-                  <div className="text-[11px] text-muted-foreground font-medium mb-2">
-                    30 天内到期 · {expireBuckets.expiring30.length} 台
-                  </div>
-                  <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto sidebar-scroll">
+                ) : (
+                  <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto sidebar-scroll">
                     {expireBuckets.expiring30.map(e => (
                       <div key={e.name} className="flex items-center gap-2 text-xs">
                         <span className="flex-1 min-w-0 flex items-center gap-1.5" title={e.name}>
@@ -758,8 +916,8 @@ export function StatsView({ nodes, statuses, showSource }: Props) {
                       </div>
                     ))}
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           )}
           <div className="mt-auto pt-4 border-t border-border/40 grid grid-cols-4 gap-2">

@@ -5,8 +5,10 @@ import {
   daysUntilNextReset,
   localDateId,
   localMonthId,
+  msUntilNextReset,
   nextCycleStartId,
   nextResetTime,
+  resetCountdownLabel,
 } from './trafficCycle'
 
 // 全部用 new Date(y, m, d, h) 构造本地时间——重置时刻的语义就是"本地零点"。
@@ -119,5 +121,46 @@ describe('daysUntilNextReset', () => {
   test('跨月与月末钳制同样生效', () => {
     // 1 月 31 号起始的周期在 2 月 28 号重置
     expect(daysUntilNextReset(31, at(2026, 2, 1, 0))).toBe('27天')
+  })
+})
+
+describe('msUntilNextReset', () => {
+  test('与 nextResetTime 的差值一致', () => {
+    const now = at(2026, 9, 4, 18)
+    expect(msUntilNextReset(1, now)).toBe(nextResetTime(1, now).getTime() - now.getTime())
+  })
+
+  test('同一时刻的重置点不会算出 0 或负数（顺延到下个周期）', () => {
+    expect(msUntilNextReset(15, at(2026, 9, 15, 0))).toBeGreaterThan(0)
+  })
+})
+
+describe('resetCountdownLabel', () => {
+  test('>3 天只给天数，不带小时', () => {
+    // 26 天 12 小时
+    expect(resetCountdownLabel(msUntilNextReset(1, at(2026, 9, 4, 12)))).toBe('26天')
+    // 4 天整
+    expect(resetCountdownLabel(4 * 86400000)).toBe('4天')
+  })
+
+  test('≤3 天细化到小时', () => {
+    // 3 天 5 小时
+    expect(resetCountdownLabel(3 * 86400000 + 5 * 3600000)).toBe('3天5小时')
+    // 整 1 天不缀"0小时"
+    expect(resetCountdownLabel(86400000)).toBe('1天')
+  })
+
+  test('不足 24 小时降级到小时，不足 1 小时降级到分钟', () => {
+    expect(resetCountdownLabel(23 * 3600000 + 59 * 60000)).toBe('23小时')
+    expect(resetCountdownLabel(3600000)).toBe('1小时')
+    expect(resetCountdownLabel(90 * 60000)).toBe('1分钟')
+    // 不足 1 分钟也显示 1分钟，不出现"0分钟"这种读起来像已重置的文案
+    expect(resetCountdownLabel(30000)).toBe('1分钟')
+  })
+
+  test('已到期/非法值统一显示即将', () => {
+    expect(resetCountdownLabel(0)).toBe('即将')
+    expect(resetCountdownLabel(-1)).toBe('即将')
+    expect(resetCountdownLabel(Number.NaN)).toBe('即将')
   })
 })
