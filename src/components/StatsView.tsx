@@ -78,6 +78,9 @@ const TRAFFIC_MODES: {
 
 const DAY_MS = 86400000
 
+/** 30 天内到期明细最多列出多少台：两列各 8 行，高度与同排另两栏大致齐平；超出的只报数量 */
+const EXPIRE_LIST_MAX = 16
+
 function Card({
   title,
   subtitle,
@@ -841,97 +844,125 @@ export function StatsView({ nodes, statuses, showSource }: Props) {
           </div>
         </Card>
 
-        {/* 到期分布：堆叠条 + 图例 + 30 天明细 + 状态汇总。
-            拆出"刷新倒计时"后这行只剩这一张卡，索性占满整行、内部在宽屏分两栏，
-            免得分桶条被拉成一条长带而明细挤在下面 */}
+        {/* 到期与状态：整行宽度拆成三栏——分桶概览 | 30 天内明细 | 状态汇总。
+            此前是"左右两栏 + 底部通栏状态条"，在 1400px 上分桶条被拉成长带、
+            图例数字甩到标签几百像素开外、底部四个数字各自浮在一片空地中间。
+            三栏切分让每组内容各自待在一个够窄的容器里，横向宽度才成为帮助而不是负担。 */}
         <Card
           title="到期与状态"
           subtitle={expireBuckets.withExpire === 0 ? '未设置到期时间' : '按剩余天数分桶'}
           className="xl:col-span-5"
         >
-          {expireBuckets.withExpire === 0 ? (
-            <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground py-12">
-              节点均未设置到期时间
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-x-10 gap-y-5">
-              {/* 左栏：分桶条 + 图例 */}
-              <div>
-                {/* 堆叠条：一段一桶，宽度按占比。
-                    段间留 2px 卡片底色：色相相邻时缝隙能划清边界，也是亮色下
-                    琥珀/青绿低于 3:1 时要求的辅助编码之一。
-                    百分比宽度加 gap 会溢出，交给 flex 默认的按比例收缩吸收 */}
-                <div className="flex h-3 gap-0.5 rounded-full overflow-hidden bg-muted/80">
-                  {expireBuckets.buckets.map(b => (
-                    <div
-                      key={b.label}
-                      className="h-full transition-all duration-500"
-                      style={{
-                        width: `${(b.count / expireBuckets.withExpire) * 100}%`,
-                        // 只有 1 台的桶占比不到 3%，会被压成看不见的窄缝、还被外圈圆角吃掉半截——
-                        // 而"7天内"恰恰是最该被看见的那个。给个下限，失真不到 1%
-                        minWidth: '6px',
-                        backgroundColor: b.color,
-                      }}
-                      title={`${b.label} ${b.count} 台`}
-                    />
-                  ))}
-                </div>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-2 mt-4">
-                  {expireBuckets.buckets.map(b => (
-                    <div key={b.label} className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: b.color }} />
-                      <span className="text-xs text-muted-foreground flex-1">{b.label}</span>
-                      <span className="text-xs font-bold tabular-nums">{b.count}</span>
-                    </div>
-                  ))}
-                </div>
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-x-8 gap-y-6">
+            {expireBuckets.withExpire === 0 ? (
+              <div className="xl:col-span-10 flex items-center justify-center text-sm text-muted-foreground py-12">
+                节点均未设置到期时间
               </div>
-
-              {/* 右栏：30 天内到期明细，最紧急的在前（含已过期） */}
-              <div className="flex flex-col">
-                <div className="text-[11px] text-muted-foreground font-medium mb-2">
-                  30 天内到期 · {expireBuckets.expiring30.length} 台
-                </div>
-                {expireBuckets.expiring30.length === 0 ? (
-                  <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground py-6">
-                    30 天内无节点到期
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto sidebar-scroll">
-                    {expireBuckets.expiring30.map(e => (
-                      <div key={e.name} className="flex items-center gap-2 text-xs">
-                        <span className="flex-1 min-w-0 flex items-center gap-1.5" title={e.name}>
-                          {e.region && <Flag code={e.region} className="shrink-0" />}
-                          <span className="truncate">{e.name}</span>
-                        </span>
-                        <span
-                          className={cn(
-                            'shrink-0 tabular-nums font-medium',
-                            e.days <= 0 ? 'text-rose-600' : e.days <= 7 ? 'text-amber-600' : 'text-muted-foreground',
-                          )}
-                        >
-                          {e.days <= 0 ? '已过期' : `${e.days} 天`}
-                        </span>
-                      </div>
+            ) : (
+              <>
+                {/* 栏一：分桶条 + 图例 */}
+                <div className="xl:col-span-4">
+                  <div className="text-[11px] text-muted-foreground font-medium mb-2">剩余天数分布</div>
+                  {/* 堆叠条：一段一桶，宽度按占比。
+                      段间留 2px 卡片底色：色相相邻时缝隙能划清边界，也是亮色下
+                      琥珀/青绿低于 3:1 时要求的辅助编码之一。
+                      百分比宽度加 gap 会溢出，交给 flex 默认的按比例收缩吸收 */}
+                  <div className="flex h-3 gap-0.5 rounded-full overflow-hidden bg-muted/80">
+                    {expireBuckets.buckets.map(b => (
+                      <div
+                        key={b.label}
+                        className="h-full transition-all duration-500"
+                        style={{
+                          width: `${(b.count / expireBuckets.withExpire) * 100}%`,
+                          // 只有 1 台的桶占比不到 3%，会被压成看不见的窄缝、还被外圈圆角吃掉半截——
+                          // 而"7天内"恰恰是最该被看见的那个。给个下限，失真不到 1%
+                          minWidth: '6px',
+                          backgroundColor: b.color,
+                        }}
+                        title={`${b.label} ${b.count} 台`}
+                      />
                     ))}
                   </div>
-                )}
+                  {/* 图例：色块、标签、数字紧挨成一组，整组再按行流排。
+                      原先是两列网格 + 数字右对齐，在整行宽度下标签和它的数字隔着
+                      大半个屏幕，读者得横着扫过去配对——右对齐带来的数值可比性，
+                      在只有四五个桶且上方已有堆叠条的情况下并不值这个代价 */}
+                  <div className="flex flex-wrap gap-x-5 gap-y-2 mt-4">
+                    {expireBuckets.buckets.map(b => (
+                      <span key={b.label} className="inline-flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: b.color }} />
+                        <span className="text-xs text-muted-foreground">{b.label}</span>
+                        <span className="text-xs font-bold tabular-nums">{b.count}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 栏二：30 天内到期明细，最紧急的在前（含已过期） */}
+                <div className="xl:col-span-6">
+                  <div className="text-[11px] text-muted-foreground font-medium mb-2">
+                    30 天内到期 · {expireBuckets.expiring30.length} 台
+                  </div>
+                  {expireBuckets.expiring30.length === 0 ? (
+                    <div className="flex items-center justify-center text-xs text-muted-foreground py-6">
+                      30 天内无节点到期
+                    </div>
+                  ) : (
+                    <>
+                      {/* 多列流式（CSS columns）而不是网格：先填满左列再换右列，
+                          "最紧急在最前"的读序才保得住；网格是逐行铺的，会把第 2 紧急的
+                          甩到右边去。
+                          定量截断代替滚动容器——原先 max-h-48 会把某一行拦腰切一半，
+                          看着像渲染坏了，而且超出部分连"还有多少台"都不交代 */}
+                      <div className="sm:columns-2 gap-x-6">
+                        {expireBuckets.expiring30.slice(0, EXPIRE_LIST_MAX).map(e => (
+                          <div key={e.name} className="flex items-center gap-2 text-xs mb-1.5 break-inside-avoid">
+                            <span className="flex-1 min-w-0 flex items-center gap-1.5" title={e.name}>
+                              {e.region && <Flag code={e.region} className="shrink-0" />}
+                              <span className="truncate">{e.name}</span>
+                            </span>
+                            <span
+                              className={cn(
+                                'shrink-0 tabular-nums font-medium',
+                                e.days <= 0 ? 'text-rose-600' : e.days <= 7 ? 'text-amber-600' : 'text-muted-foreground',
+                              )}
+                            >
+                              {e.days <= 0 ? '已过期' : `${e.days} 天`}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      {expireBuckets.expiring30.length > EXPIRE_LIST_MAX && (
+                        <div className="text-[10px] text-muted-foreground/70 mt-1.5">
+                          仅列出最紧急的 {EXPIRE_LIST_MAX} 台，还有{' '}
+                          {expireBuckets.expiring30.length - EXPIRE_LIST_MAX} 台在 30 天内到期
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </>
+            )}
+
+            {/* 栏三：状态汇总。窄栏竖排，标签与数字仍在同一视线内；
+                宽屏用左细线与到期内容分隔——它回答的是另一个问题（健康度，不是到期） */}
+            <div className="xl:col-span-2 border-t border-border/40 pt-5 xl:border-t-0 xl:pt-0 xl:border-l xl:pl-8">
+              <div className="text-[11px] text-muted-foreground font-medium mb-2">节点状态</div>
+              <div className="flex flex-col gap-2">
+                {([
+                  { label: '正常', count: kpi.statusCounts.normal, cls: 'text-emerald-600', dot: 'bg-emerald-500' },
+                  { label: '注意', count: kpi.statusCounts.warning, cls: 'text-amber-600', dot: 'bg-amber-500' },
+                  { label: '风险', count: kpi.statusCounts.risk, cls: 'text-rose-600', dot: 'bg-rose-500' },
+                  { label: '离线', count: kpi.statusCounts.offline, cls: 'text-muted-foreground', dot: 'bg-muted-foreground/50' },
+                ]).map(s => (
+                  <div key={s.label} className="flex items-center gap-2">
+                    <span className={cn('w-2 h-2 rounded-full shrink-0', s.dot)} />
+                    <span className="text-xs text-muted-foreground flex-1">{s.label}</span>
+                    <span className={cn('text-sm font-bold tabular-nums', s.cls)}>{s.count}</span>
+                  </div>
+                ))}
               </div>
             </div>
-          )}
-          <div className="mt-auto pt-4 border-t border-border/40 grid grid-cols-4 gap-2">
-            {([
-              { label: '正常', count: kpi.statusCounts.normal, cls: 'text-emerald-600' },
-              { label: '注意', count: kpi.statusCounts.warning, cls: 'text-amber-600' },
-              { label: '风险', count: kpi.statusCounts.risk, cls: 'text-rose-600' },
-              { label: '离线', count: kpi.statusCounts.offline, cls: 'text-muted-foreground' },
-            ]).map(s => (
-              <div key={s.label} className="text-center">
-                <div className={cn('text-lg font-bold tabular-nums', s.cls)}>{s.count}</div>
-                <div className="text-[10px] text-muted-foreground">{s.label}</div>
-              </div>
-            ))}
           </div>
         </Card>
       </div>

@@ -28,6 +28,7 @@ import { avgLatency } from './utils/latency'
 import { remainingDays } from './utils/cost'
 import { computeGlobalStats } from './utils/globalStats'
 import { SORT_NATURAL_DIR } from './components/SortMenu'
+import { isEnabledView } from './components/ViewToggle'
 import type { Sort, SortDir, View } from './types'
 import type { NodeStatusCategory } from './utils/stableStatus'
 
@@ -38,8 +39,7 @@ const SORT_DIR_KEY = 'nodeget.sortDir'
 
 function initialView(): View {
   const v = localStorage.getItem(VIEW_KEY)
-  if (v === 'console' || v === 'table' || v === 'map') return v
-  return 'cards'
+  return isEnabledView(v) ? v : 'cards'
 }
 
 function initialSort(): Sort {
