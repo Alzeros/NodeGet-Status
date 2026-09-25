@@ -64,6 +64,9 @@ const DYN_INTERVAL_MS = 2000
 const LATENCY_INTERVAL_MS = 30_000
 const LATENCY_QUERY_TIMEOUT = 10_000
 const LATENCY_WINDOW_MS = 24 * 60 * 60 * 1000
+// 节点列表是整页的入口，拿不到就什么都拉不了、页面一直停在「暂无节点」。
+// 首连抖动、后端正忙都会让它超时，按退避重试几次再报错
+const LIST_RETRY_DELAYS_MS = [2000, 5000, 10_000]
 const HISTORY_LIMIT = 60
 const TRAFFIC_CYCLE_KEY_PREFIX = 'metadata_traffic_cycle:'
 // 自然日/自然月窗口，由 scripts/monthly-traffic-worker.js 写入。
@@ -371,8 +374,21 @@ export function useNodes(config: SiteConfig | null) {
       mergeTraffic(setCalendarMonthTraffic, monthUpdates)
     }
 
+    let disposed = false
+    const listUuidsWithRetry = async (client: BackendPool['entries'][number]['client']) => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await listAgentUuids(client)
+        } catch (e) {
+          const delay = LIST_RETRY_DELAYS_MS[attempt]
+          if (delay == null || disposed) throw e
+          await new Promise(resolve => setTimeout(resolve, delay))
+        }
+      }
+    }
+
     const bootstrap = async () => {
-      const agentsRes = await pool.fanout(listAgentUuids)
+      const agentsRes = await pool.fanout(listUuidsWithRetry)
       setErrors(prev => [...prev, ...agentsRes.errors])
 
       const seed = new Map<string, Agent>()
@@ -557,6 +573,7 @@ export function useNodes(config: SiteConfig | null) {
     const clockTimer = setInterval(() => setTick(t => t + 1), 5000)
 
     return () => {
+      disposed = true
       clearInterval(dynTimer)
       clearInterval(clockTimer)
       if (latTimer) clearInterval(latTimer)

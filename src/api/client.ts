@@ -72,6 +72,8 @@ export class RpcClient {
       clearTimeout(timer)
       log(this.name, `open in ${(performance.now() - t0).toFixed(0)}ms (flush ${this.outbox.length})`)
       ok()
+      // 首连失败时 opened 已经 reject 且不会再变；重连成功要换成已就绪的，否则之后每个 call 都立刻失败
+      this.opened = Promise.resolve()
       for (const m of this.outbox) ws.send(m)
       this.outbox = []
     }
