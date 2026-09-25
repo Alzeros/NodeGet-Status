@@ -105,6 +105,20 @@ export interface Node {
   dailyTraffic?: MonthlyTraffic
   /** 自然月窗口用量（当月）。同上，cycleId 存 YYYY-MM。 */
   calendarMonthTraffic?: MonthlyTraffic
+  /** 已结束的自然日逐日用量，按日期升序，不含今天（今天看 dailyTraffic）。同样来自主控 worker。 */
+  dailyHistory?: DailyTrafficDay[]
+}
+
+/**
+ * 一个已结束的自然日的流量（主控时区），由采样 worker 写入 metadata_traffic_daily。
+ * partial：worker 当天中途才开始统计，数字偏小；reset：当天计数器归零过（重启），只算到了重启后的部分。
+ */
+export interface DailyTrafficDay {
+  id: string
+  received: number
+  transmitted: number
+  partial?: boolean
+  reset?: boolean
 }
 
 export interface MonthlyTraffic {

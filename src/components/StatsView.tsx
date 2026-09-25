@@ -8,6 +8,8 @@ import { cn, loadColor } from '../utils/cn'
 import { Flag } from './Flag'
 import { currencyCode, convert, getUsdRates } from '../utils/currency'
 import { currentCycleId, localDateId, localMonthId, msUntilNextReset, nextCycleStartId, resetCountdownLabel } from '../utils/trafficCycle'
+import { buildDailyBars, DAILY_CHART_DAYS } from '../utils/dailyTraffic'
+import { DailyTrafficChart } from './DailyTrafficChart'
 import type { Node } from '../types'
 import type { NodeStatusCategory } from '../utils/stableStatus'
 
@@ -440,6 +442,9 @@ export function StatsView({ nodes, statuses, showSource }: Props) {
     return id === local ? `统计窗口 ${id}` : `统计窗口 ${id}（主控本地时区）`
   }, [visible, trafficMode])
 
+  // 每日流量：已结束的日子来自 worker 归档的历史，今天用实时窗口
+  const daily = useMemo(() => buildDailyBars(visible), [visible])
+
   // 流量重置倒计时榜。只看"有额度"的机器，与窗口数据无关，所以不受 worker 是否更新影响
   const resetRows = useMemo(
     () => buildResetData(visible, showSource, new Date()),
@@ -842,6 +847,15 @@ export function StatsView({ nodes, statuses, showSource }: Props) {
             按距下次重置升序，7 天内的机器全部列出（最少 10 行）· 红 = 24 小时内、琥珀 = 3 天内 · 剩余 = 额度 −
             本周期已用
           </div>
+        </Card>
+
+        {/* 每日流量：整行通栏，30 根柱子看趋势；分机器的明细在上面的流量排行 */}
+        <Card
+          title="每日流量"
+          subtitle={daily ? `近 ${DAILY_CHART_DAYS} 天 · 全部机器上下行合计` : '需要主控的采样 Worker'}
+          className="xl:col-span-5"
+        >
+          <DailyTrafficChart data={daily} />
         </Card>
 
         {/* 到期与状态：整行宽度拆成三栏——分桶概览 | 30 天内明细 | 状态汇总。

@@ -30,6 +30,12 @@ export function localDateId(now: Date = new Date()) {
   return fmt(now.getFullYear(), now.getMonth(), now.getDate())
 }
 
+/** 日期 id 前后挪 delta 天。id 本身不带时区，按 UTC 算，避开本地夏令时切换日的 23/25 小时 */
+export function shiftDayId(id: string, delta: number) {
+  const [y, m, d] = id.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d + delta)).toISOString().slice(0, 10)
+}
+
 /** 自然月窗口 id，YYYY-MM。「当月流量」同理，不看各家重置日。 */
 export function localMonthId(now: Date = new Date()) {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}`

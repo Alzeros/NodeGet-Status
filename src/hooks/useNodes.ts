@@ -9,7 +9,7 @@ import type { LatencyBuffer } from '../utils/latencyBuffer'
 import { billedTraffic } from '../utils/derive'
 import { isOnline } from '../utils/status'
 import { clampResetDay, currentCycleId } from '../utils/trafficCycle'
-import type { DynamicSummary, HistorySample, MonthlyTraffic, Node, NodeMeta, SiteConfig } from '../types'
+import type { DailyTrafficDay, DynamicSummary, HistorySample, MonthlyTraffic, Node, NodeMeta, SiteConfig } from '../types'
 
 type Agent = Pick<Node, 'uuid' | 'source' | 'meta' | 'static'>
 
@@ -72,6 +72,11 @@ const TRAFFIC_CYCLE_KEY_PREFIX = 'metadata_traffic_cycle:'
 // 自然日/自然月窗口，由 scripts/monthly-traffic-worker.js 写入。
 // 窗口 id 在记录里，不在 key 上——前端不用猜主控时区，也省一次 KV 读。
 const TRAFFIC_WINDOW_KEY = 'metadata_traffic_window'
+// 已结束的自然日逐日用量，同样由 worker 写入。一天只变一次，单独慢轮询，不跟 2 秒的动态数据走
+const TRAFFIC_DAILY_KEY = 'metadata_traffic_daily'
+const DAILY_HISTORY_INTERVAL_MS = 15 * 60_000
+// 切回前台时，距上次读取超过这个时长才补读
+const DAILY_HISTORY_STALE_MS = 5 * 60_000
 
 interface MonthlyTrafficRecord {
   cycleId: string
@@ -162,6 +167,29 @@ function parseTrafficWindows(raw: unknown): { day?: MonthlyTraffic; month?: Mont
     return { day: parseTrafficWindow(record.day), month: parseTrafficWindow(record.month) }
   } catch {
     return {}
+  }
+}
+
+/**
+ * metadata_traffic_daily：{ days: { 'YYYY-MM-DD': { received, transmitted, partial?, reset? } }, snapshots, updatedAt }。
+ * 只取 days；snapshots 是 worker 回填用的中间态。返回按日期升序的数组。
+ */
+function parseDailyHistory(raw: unknown): DailyTrafficDay[] | undefined {
+  try {
+    const value = typeof raw === 'string' ? JSON.parse(raw) : raw
+    const days = (value as { days?: unknown } | null)?.days
+    if (!days || typeof days !== 'object') return undefined
+    const out: DailyTrafficDay[] = []
+    for (const [id, v] of Object.entries(days as Record<string, Partial<DailyTrafficDay> | null>)) {
+      if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(id)) continue
+      const day: DailyTrafficDay = { id, received: validTotal(v.received) ?? 0, transmitted: validTotal(v.transmitted) ?? 0 }
+      if (v.partial) day.partial = true
+      if (v.reset) day.reset = true
+      out.push(day)
+    }
+    return out.sort((a, b) => a.id.localeCompare(b.id))
+  } catch {
+    return undefined
   }
 }
 
@@ -311,6 +339,7 @@ export function useNodes(config: SiteConfig | null) {
   const [monthlyTraffic, setMonthlyTraffic] = useState<Map<string, MonthlyTraffic>>(new Map())
   const [dailyTraffic, setDailyTraffic] = useState<Map<string, MonthlyTraffic>>(new Map())
   const [calendarMonthTraffic, setCalendarMonthTraffic] = useState<Map<string, MonthlyTraffic>>(new Map())
+  const [dailyHistory, setDailyHistory] = useState<Map<string, DailyTrafficDay[]>>(new Map())
 
   const agentsRef = useRef(agents)
   useEffect(() => { agentsRef.current = agents }, [agents])
@@ -374,6 +403,25 @@ export function useNodes(config: SiteConfig | null) {
       mergeTraffic(setCalendarMonthTraffic, monthUpdates)
     }
 
+    let dailyLoadedAt = 0
+    const loadDailyHistory = async () => {
+      if (document.hidden) return
+      dailyLoadedAt = Date.now()
+      await Promise.allSettled(
+        pool.entries.map(async entry => {
+          const uuids = sourceUuids.get(entry.name) || []
+          if (!uuids.length) return
+          const rows = await kvGetMulti(entry.client, uuids.map(u => ({ namespace: u, key: TRAFFIC_DAILY_KEY })))
+          const updates = new Map<string, DailyTrafficDay[]>()
+          for (const row of rows || []) {
+            const days = parseDailyHistory(row?.value)
+            if (days) updates.set(monthlyTrafficMapKey(entry.name, row.namespace), days)
+          }
+          if (updates.size) setDailyHistory(prev => new Map([...prev, ...updates]))
+        }),
+      )
+    }
+
     let disposed = false
     const listUuidsWithRetry = async (client: BackendPool['entries'][number]['client']) => {
       for (let attempt = 0; ; attempt++) {
@@ -398,6 +446,10 @@ export function useNodes(config: SiteConfig | null) {
         for (const uuid of uuids) seed.set(uuid, blankAgent(uuid, source))
       }
       setAgents(seed)
+
+      // 每日流量历史：与元数据并行，不阻塞 loading
+      loadDailyHistory().catch(() => {})
+      dailyTimer = setInterval(() => loadDailyHistory().catch(() => {}), DAILY_HISTORY_INTERVAL_MS)
 
       // 并行获取元数据/静态数据、动态数据、延迟数据
       const metaStaticTask = Promise.all(
@@ -553,6 +605,7 @@ export function useNodes(config: SiteConfig | null) {
     }
 
     let latTimer: ReturnType<typeof setInterval> | null = null
+    let dailyTimer: ReturnType<typeof setInterval> | null = null
 
     bootstrap()
       .catch((e: unknown) => {
@@ -566,6 +619,7 @@ export function useNodes(config: SiteConfig | null) {
       if (document.visibilityState !== 'visible') return
       tickDynamic()
       tickLatency().catch(() => {})
+      if (Date.now() - dailyLoadedAt > DAILY_HISTORY_STALE_MS) loadDailyHistory().catch(() => {})
     }
     document.addEventListener('visibilitychange', onVisible)
 
@@ -577,6 +631,7 @@ export function useNodes(config: SiteConfig | null) {
       clearInterval(dynTimer)
       clearInterval(clockTimer)
       if (latTimer) clearInterval(latTimer)
+      if (dailyTimer) clearInterval(dailyTimer)
       document.removeEventListener('visibilitychange', onVisible)
       setPool(null)
       pool.close()
@@ -619,10 +674,11 @@ export function useNodes(config: SiteConfig | null) {
         monthlyTraffic: nodeMonthlyTraffic,
         dailyTraffic: dayRecord ? previewMonthlyTraffic(dayRecord, dyn) : undefined,
         calendarMonthTraffic: monthRecord ? previewMonthlyTraffic(monthRecord, dyn) : undefined,
+        dailyHistory: dailyHistory.get(mapKey),
       })
     }
     return out
-  }, [agents, live, history, monthlyTraffic, dailyTraffic, calendarMonthTraffic, tick])
+  }, [agents, live, history, monthlyTraffic, dailyTraffic, calendarMonthTraffic, dailyHistory, tick])
 
   return { nodes, errors, loading, pool, latencyTracks, metaHydrated }
 }
