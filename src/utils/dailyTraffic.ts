@@ -1,13 +1,25 @@
 import type { Node } from '../types'
+import { displayName } from './derive'
 import { shiftDayId } from './trafficCycle'
 
 /*
  * 每日流量柱状图的数据。已结束的日子来自 worker 归档的 dailyHistory，
  * 今天用实时窗口 dailyTraffic——它被当前计数器往前推着走，柱子会动。
- * 全部机器合计；分机器的明细留给流量排行。
+ * 柱子是全部机器合计；每根柱子同时留着分机器的明细，悬停时列出来。
  */
 
 export const DAILY_CHART_DAYS = 30
+
+/** 一台机器在某一天的用量 */
+export interface DailyBarNode {
+  uuid: string
+  source: string
+  name: string
+  region: string | null
+  received: number
+  transmitted: number
+  total: number
+}
 
 export interface DailyBar {
   id: string
@@ -20,6 +32,8 @@ export interface DailyBar {
   partial: number
   /** 当天计数器归零过的机器数（重启），数字偏小 */
   reset: number
+  /** 分机器明细，按用量降序 */
+  nodes: DailyBarNode[]
   today: boolean
   /** 这一天没有任何机器有记录 */
   empty: boolean
@@ -41,7 +55,13 @@ export interface DailyChart {
 }
 
 function blank(id: string, today: boolean): DailyBar {
-  return { id, total: 0, received: 0, transmitted: 0, machines: 0, partial: 0, reset: 0, today, empty: true }
+  return { id, total: 0, received: 0, transmitted: 0, machines: 0, partial: 0, reset: 0, nodes: [], today, empty: true }
+}
+
+/** 地区代码规整成两位大写字母，无效值返回 null（与 StatsView 的 regionOf 同口径） */
+function regionOf(n: Node) {
+  const code = n.meta?.region?.trim().toUpperCase()
+  return code && /^[A-Z]{2}$/.test(code) ? code : null
 }
 
 export function buildDailyBars(nodes: Node[], count = DAILY_CHART_DAYS): DailyChart | null {
@@ -49,6 +69,7 @@ export function buildDailyBars(nodes: Node[], count = DAILY_CHART_DAYS): DailyCh
   const todayId = nodes.find(n => n.dailyTraffic)?.dailyTraffic?.cycleId ?? null
   const byId = new Map<string, DailyBar>()
   const add = (
+    n: Node,
     id: string,
     received: number,
     transmitted: number,
@@ -63,17 +84,27 @@ export function buildDailyBars(nodes: Node[], count = DAILY_CHART_DAYS): DailyCh
     b.machines++
     if (flags.partial) b.partial++
     if (flags.reset) b.reset++
+    b.nodes.push({
+      uuid: n.uuid,
+      source: n.source,
+      name: displayName(n),
+      region: regionOf(n),
+      received,
+      transmitted,
+      total: received + transmitted,
+    })
     byId.set(id, b)
   }
   for (const n of nodes) {
     for (const d of n.dailyHistory ?? []) {
       // 历史只收已结束的日子；今天以实时窗口为准，免得两边都算一遍
       if (todayId && d.id >= todayId) continue
-      add(d.id, d.received, d.transmitted, d, false)
+      add(n, d.id, d.received, d.transmitted, d, false)
     }
-    if (n.dailyTraffic) add(n.dailyTraffic.cycleId, n.dailyTraffic.received, n.dailyTraffic.transmitted, {}, true)
+    if (n.dailyTraffic) add(n, n.dailyTraffic.cycleId, n.dailyTraffic.received, n.dailyTraffic.transmitted, {}, true)
   }
   if (!byId.size) return null
+  for (const b of byId.values()) b.nodes.sort((a, c) => c.total - a.total)
 
   const end = todayId ?? [...byId.keys()].sort().pop()!
   const bars: DailyBar[] = []
@@ -95,6 +126,34 @@ export function buildDailyBars(nodes: Node[], count = DAILY_CHART_DAYS): DailyCh
     max: Math.max(...bars.map(b => b.total), 1),
     flagged: bars.filter(b => b.partial || b.reset).length,
   }
+}
+
+/** 悬停明细里单独列出的门槛与行数上限，其余并成"其他" */
+export const BREAKDOWN_MIN_BYTES = 1024 ** 3
+export const BREAKDOWN_MAX_ROWS = 10
+
+export interface Breakdown {
+  rows: DailyBarNode[]
+  other: { count: number; total: number } | null
+}
+
+/**
+ * 悬停明细：按用量降序单独列出，不足 1 GiB 的和超出行数上限的并成"其他"，
+ * 几十台机器的一天也不会拖出一长条。nodes 需已按 total 降序。
+ */
+export function foldBreakdown(nodes: DailyBarNode[], min = BREAKDOWN_MIN_BYTES, max = BREAKDOWN_MAX_ROWS): Breakdown {
+  const rows: DailyBarNode[] = []
+  let count = 0
+  let total = 0
+  for (const n of nodes) {
+    if (n.total >= min && rows.length < max) {
+      rows.push(n)
+    } else {
+      count++
+      total += n.total
+    }
+  }
+  return { rows, other: count ? { count, total } : null }
 }
 
 /**

@@ -855,7 +855,7 @@ export function StatsView({ nodes, statuses, showSource }: Props) {
           subtitle={daily ? `近 ${DAILY_CHART_DAYS} 天 · 全部机器上下行合计` : '需要主控的采样 Worker'}
           className="xl:col-span-5"
         >
-          <DailyTrafficChart data={daily} />
+          <DailyTrafficChart data={daily} showSource={showSource} />
         </Card>
 
         {/* 到期与状态：整行宽度拆成三栏——分桶概览 | 30 天内明细 | 状态汇总。

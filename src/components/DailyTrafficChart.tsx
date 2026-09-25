@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { bytes } from '../utils/format'
 import { cn } from '../utils/cn'
-import { DAILY_CHART_DAYS, niceBytes } from '../utils/dailyTraffic'
+import { DAILY_CHART_DAYS, foldBreakdown, niceBytes } from '../utils/dailyTraffic'
 import type { DailyBar, DailyChart } from '../utils/dailyTraffic'
+import { Flag } from './Flag'
 
 /*
  * 每日流量柱状图。纯 div 画：一个系列、30 根柱子，不值得为它把图表库拉进分析页。
@@ -41,7 +42,7 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
   )
 }
 
-export function DailyTrafficChart({ data }: { data: DailyChart | null }) {
+export function DailyTrafficChart({ data, showSource }: { data: DailyChart | null; showSource: boolean }) {
   const [active, setActive] = useState<number | null>(null)
   const [showTable, setShowTable] = useState(false)
 
@@ -58,6 +59,8 @@ export function DailyTrafficChart({ data }: { data: DailyChart | null }) {
   const top = niceBytes(data.max)
   const heightPct = (b: DailyBar) => (b.empty ? 0 : Math.max((b.total / top) * 100, 1))
   const hovered = active != null ? data.bars[active] : null
+  const breakdown = hovered && !hovered.empty ? foldBreakdown(hovered.nodes) : null
+  const share = (v: number) => (hovered && hovered.total > 0 ? `${Math.round((v / hovered.total) * 100)}%` : '')
   // 直接标数只标峰值和今天；两者挨得太近会撞，只留峰值
   const peakIdx = data.peak ? data.bars.indexOf(data.peak) : -1
   const todayIdx = data.today ? data.bars.indexOf(data.today) : -1
@@ -120,7 +123,8 @@ export function DailyTrafficChart({ data }: { data: DailyChart | null }) {
               </div>
               {hovered && active != null && (
                 <div
-                  className="absolute top-0 z-10 pointer-events-none rounded-lg border border-border/60 bg-card text-card-foreground shadow-lg px-3 py-2 text-xs whitespace-nowrap"
+                  // w-max：绝对定位默认按"离右边还剩多少"收缩宽度，柱子越靠右浮层越窄，两列会叠起来
+                  className="absolute top-0 z-10 pointer-events-none w-max max-w-[min(36rem,calc(100vw-2rem))] rounded-lg border border-border/60 bg-card text-card-foreground shadow-lg px-3 py-2 text-xs whitespace-nowrap"
                   style={{
                     left: `${((active + 0.5) / n) * 100}%`,
                     // 两端的浮层往里靠，别伸出卡片
@@ -144,6 +148,27 @@ export function DailyTrafficChart({ data }: { data: DailyChart | null }) {
                       )}
                       {hovered.reset > 0 && (
                         <div className="text-amber-600">{hovered.reset} 台当天重启过，数字偏小</div>
+                      )}
+                      {/* 分机器明细：降序；不足 1 GiB 的和超出行数的并成"其他"。
+                          两列排：十来行竖着排会伸出卡片压到下一张，两列正好落在绘图区里 */}
+                      {breakdown && (
+                        <div className="mt-2 pt-2 border-t border-border/50 grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-1">
+                          {breakdown.rows.map(r => (
+                            <div key={`${r.source}:${r.uuid}`} className="flex items-center gap-2 min-w-[14rem]">
+                              {r.region && <Flag code={r.region} className="shrink-0" />}
+                              <span className="flex-1 min-w-0 truncate">{showSource ? `${r.source}·${r.name}` : r.name}</span>
+                              <span className="tabular-nums font-medium">{bytes(r.total)}</span>
+                              <span className="w-8 text-right tabular-nums text-muted-foreground">{share(r.total)}</span>
+                            </div>
+                          ))}
+                          {breakdown.other && (
+                            <div className="flex items-center gap-2 min-w-[14rem] text-muted-foreground">
+                              <span className="flex-1 min-w-0 truncate">其他 · {breakdown.other.count} 台</span>
+                              <span className="tabular-nums">{bytes(breakdown.other.total)}</span>
+                              <span className="w-8 text-right tabular-nums">{share(breakdown.other.total)}</span>
+                            </div>
+                          )}
+                        </div>
                       )}
                     </>
                   )}
