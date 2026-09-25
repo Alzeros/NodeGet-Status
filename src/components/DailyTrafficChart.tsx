@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { bytes } from '../utils/format'
 import { cn } from '../utils/cn'
 import { DAILY_CHART_DAYS, foldBreakdown, niceBytes } from '../utils/dailyTraffic'
@@ -8,7 +8,8 @@ import { Flag } from './Flag'
 /*
  * 每日流量柱状图。纯 div 画：一个系列、30 根柱子，不值得为它把图表库拉进分析页。
  * 规格：柱宽封顶 24px、相邻柱之间留 2px 底色缝、顶端 4px 圆角、底边贴基线；网格两条实线细线，刻度取整；
- * 悬停/聚焦出浮层；只有峰值和今天直接标数，其余靠浮层和数据表。
+ * 悬停/聚焦出浮层，浮层放在被指柱子旁边而不是上面——盖住它就看不出鼠标指的是哪一天；
+ * 同时其余柱子变淡、x 轴在正下方标出日期。只有峰值和今天直接标数，其余靠浮层和数据表。
  * 颜色只用主题色一个色相：今天用浅一档（还在累计），无记录的日子只留基线上一道灰。
  */
 
@@ -45,6 +46,34 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
 export function DailyTrafficChart({ data, showSource }: { data: DailyChart | null; showSource: boolean }) {
   const [active, setActive] = useState<number | null>(null)
   const [showTable, setShowTable] = useState(false)
+  const plotRef = useRef<HTMLDivElement>(null)
+  const tipRef = useRef<HTMLDivElement>(null)
+  const [tipPos, setTipPos] = useState<{ left: number; top: number } | null>(null)
+  const n = data?.bars.length ?? 0
+
+  // 浮层位置：右边放得下就贴在柱子右侧，否则贴左侧；两边都放不下（窄屏）就落到绘图区下面。
+  // 浮层宽度随明细行数变，只能渲染后量，所以量完再定位、定位前不显示
+  useLayoutEffect(() => {
+    const plot = plotRef.current
+    const tip = tipRef.current
+    if (active == null || !plot || !tip || !n) {
+      setTipPos(null)
+      return
+    }
+    const GAP = 10
+    const plotW = plot.clientWidth
+    const tipW = tip.offsetWidth
+    const slot = plotW / n
+    const onRight = (active + 1) * slot + GAP
+    const onLeft = active * slot - GAP - tipW
+    if (onRight + tipW <= plotW) setTipPos({ left: onRight, top: 0 })
+    else if (onLeft >= 0) setTipPos({ left: onLeft, top: 0 })
+    else {
+      // 落到下面时对齐到那一列的中线，看着像挂在柱子底下；两头夹在绘图区内
+      const centered = (active + 0.5) * slot - tipW / 2
+      setTipPos({ left: Math.max(0, Math.min(plotW - tipW, centered)), top: plot.clientHeight + 28 })
+    }
+  }, [active, n])
 
   if (!data) {
     return (
@@ -55,7 +84,6 @@ export function DailyTrafficChart({ data, showSource }: { data: DailyChart | nul
     )
   }
 
-  const n = data.bars.length
   const top = niceBytes(data.max)
   const heightPct = (b: DailyBar) => (b.empty ? 0 : Math.max((b.total / top) * 100, 1))
   const hovered = active != null ? data.bars[active] : null
@@ -77,7 +105,7 @@ export function DailyTrafficChart({ data, showSource }: { data: DailyChart | nul
               <span className="absolute right-0 top-1/2 -translate-y-1/2">{bytes(top / 2)}</span>
               <span className="absolute right-0 bottom-0 translate-y-1/2">0</span>
             </div>
-            <div className="relative flex-1 min-w-0 h-40">
+            <div ref={plotRef} className="relative flex-1 min-w-0 h-40">
               {/* 网格线：实线、一步灰，退到背景里 */}
               <div className="absolute inset-x-0 top-0 border-t border-border/60" />
               <div className="absolute inset-x-0 top-1/2 border-t border-border/60" />
@@ -92,7 +120,11 @@ export function DailyTrafficChart({ data, showSource }: { data: DailyChart | nul
                       key={b.id}
                       type="button"
                       aria-label={describeBar(b)}
-                      className="relative flex-1 min-w-0 h-full flex items-end justify-center outline-none px-px"
+                      className={cn(
+                        'relative flex-1 min-w-0 h-full flex items-end justify-center outline-none px-px',
+                        // 被指的整列垫一层浅底，柱子矮的时候也看得出选中的是哪列
+                        i === active && 'bg-foreground/[0.06] rounded-t-sm',
+                      )}
                       onPointerEnter={() => setActive(i)}
                       onFocus={() => setActive(i)}
                       onBlur={() => setActive(null)}
@@ -111,9 +143,11 @@ export function DailyTrafficChart({ data, showSource }: { data: DailyChart | nul
                       )}
                       <div
                         className={cn(
-                          'w-full max-w-[24px] rounded-t-[4px] transition-[height,filter] duration-300',
+                          'w-full max-w-[24px] rounded-t-[4px] transition-[height,filter,opacity] duration-300',
                           b.empty ? 'bg-muted-foreground/20' : b.today ? 'bg-primary/45' : 'bg-primary',
                           i === active && !b.empty && 'brightness-125',
+                          // 悬停时其余柱子退后，被指的那根才是主角
+                          active != null && i !== active && 'opacity-40',
                         )}
                         style={{ height: b.empty ? '2px' : `${h}%` }}
                       />
@@ -123,13 +157,10 @@ export function DailyTrafficChart({ data, showSource }: { data: DailyChart | nul
               </div>
               {hovered && active != null && (
                 <div
+                  ref={tipRef}
                   // w-max：绝对定位默认按"离右边还剩多少"收缩宽度，柱子越靠右浮层越窄，两列会叠起来
-                  className="absolute top-0 z-10 pointer-events-none w-max max-w-[min(36rem,calc(100vw-2rem))] rounded-lg border border-border/60 bg-card text-card-foreground shadow-lg px-3 py-2 text-xs whitespace-nowrap"
-                  style={{
-                    left: `${((active + 0.5) / n) * 100}%`,
-                    // 两端的浮层往里靠，别伸出卡片
-                    transform: active < 4 ? 'translateX(-8%)' : active > n - 5 ? 'translateX(-92%)' : 'translateX(-50%)',
-                  }}
+                  className="absolute z-10 pointer-events-none w-max max-w-[min(36rem,calc(100vw-2rem))] rounded-lg border border-border/60 bg-card text-card-foreground shadow-lg px-3 py-2 text-xs whitespace-nowrap"
+                  style={{ left: tipPos?.left ?? 0, top: tipPos?.top ?? 0, visibility: tipPos ? 'visible' : 'hidden' }}
                 >
                   {hovered.empty ? (
                     <div className="text-muted-foreground">{hovered.id} · 无记录</div>
@@ -176,17 +207,24 @@ export function DailyTrafficChart({ data, showSource }: { data: DailyChart | nul
               )}
             </div>
           </div>
-          {/* x 轴：从右往左每 7 天一个刻度，今天在最右 */}
+          {/* x 轴：从右往左每 7 天一个刻度，今天在最右；被指的那根正下方标它的日期，挨着的刻度让位 */}
           <div className="flex gap-2 mt-1.5">
             <div className="w-14 shrink-0" />
             <div className="flex-1 flex min-w-0">
-              {data.bars.map((b, i) => (
-                <div key={b.id} className="flex-1 min-w-0 text-center text-[10px] text-muted-foreground tabular-nums">
-                  {(n - 1 - i) % 7 === 0 && (
-                    <span className="inline-block whitespace-nowrap">{b.today ? '今天' : mmdd(b.id)}</span>
-                  )}
-                </div>
-              ))}
+              {data.bars.map((b, i) => {
+                const label = b.today ? '今天' : mmdd(b.id)
+                const isTick = (n - 1 - i) % 7 === 0
+                const nearActive = active != null && Math.abs(i - active) <= 1
+                return (
+                  <div key={b.id} className="flex-1 min-w-0 text-center text-[10px] tabular-nums">
+                    {i === active ? (
+                      <span className="inline-block whitespace-nowrap font-semibold text-foreground">{label}</span>
+                    ) : isTick && !nearActive ? (
+                      <span className="inline-block whitespace-nowrap text-muted-foreground">{label}</span>
+                    ) : null}
+                  </div>
+                )
+              })}
             </div>
           </div>
         </div>
