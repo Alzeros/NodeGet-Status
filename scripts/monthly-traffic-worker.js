@@ -7,10 +7,11 @@
  * Then create a scheduled JS Worker task for that worker. Recommended interval:
  * every 30 minutes.
  *
- * 每次采样写两个 KV：
+ * 每次采样写三个 KV：
  *   metadata_traffic_cycle:<周期起始日>  按各机器自己的重置日切片，供额度/剩余量展示
  *   metadata_traffic_window             自然日 + 自然月两个窗口，供跨机器可比的流量榜单
- * 窗口桶是后加的，只从本 worker 更新后开始累计，历史数据无法回填。
+ *   metadata_traffic_daily              已结束的自然日逐日用量，供每日流量柱状图
+ * 窗口桶只从本 worker 更新后开始累计；每日历史会用主控保留的动态数据回填最近几周。
  */
 
 const DEFAULT_TOKEN = ''
@@ -21,6 +22,16 @@ const TRAFFIC_CYCLE_KEY_PREFIX = 'metadata_traffic_cycle:'
 // 前端不必猜主控在哪个时区。
 const TRAFFIC_WINDOW_KEY = 'metadata_traffic_window'
 const RESET_DAY_KEY = 'metadata_traffic_reset_day'
+// 每日历史：跨天时把前一天的自然日窗口结果归档进 days；空缺的日期用
+// agent_query_dynamic_summary 取相邻两个午夜的计数器做差回填（主控默认只保留 3~4 周动态数据）。
+// 整段历史放一个 key：前端一台读一次就够，不用按日期拼 key。
+const TRAFFIC_DAILY_KEY = 'metadata_traffic_daily'
+// 历史保留天数，够画一个季度
+const DAILY_KEEP_DAYS = 92
+// 只回填这个范围内的缺口，再往前主控也没有数据了
+const BACKFILL_DAYS = 31
+// 每台机器每轮最多查几个午夜快照：首次部署 32 个午夜分 3 轮补完，单轮 cron 不至于拖太长
+const BACKFILL_FETCH_PER_RUN = 12
 const DYNAMIC_FIELDS = ['total_received', 'total_transmitted']
 // 写回时的并发度：节点多时串行跑会把 cron 窗口拖满
 const WRITE_CONCURRENCY = 10
@@ -183,6 +194,120 @@ function advanceWindow(prev, id, row, now) {
   }
 }
 
+/** 日期 id 前后挪 delta 天。走本地时区，与窗口 id 同口径 */
+function shiftDayId(id, delta) {
+  const [y, m, d] = id.split('-').map(Number)
+  return localDateId(new Date(y, m - 1, d + delta))
+}
+
+/** 日期 id 当天的本地零点 */
+function midnightTs(id) {
+  const [y, m, d] = id.split('-').map(Number)
+  return new Date(y, m - 1, d).getTime()
+}
+
+/**
+ * metadata_traffic_daily 的结构：
+ *   days      { 'YYYY-MM-DD': { received, transmitted, partial?, reset?, source? } }  已结束的自然日
+ *   snapshots { 'YYYY-MM-DD': { received, transmitted, ts } | null }              该日零点前最后一条计数器；
+ *                                                                                  null = 查过没有（超出保留期/机器还没接入），不再重查
+ */
+function parseDaily(raw) {
+  try {
+    const value = typeof raw === 'string' ? JSON.parse(raw) : raw
+    if (!value || typeof value !== 'object' || !value.days || typeof value.days !== 'object') return null
+    return {
+      days: { ...value.days },
+      snapshots: value.snapshots && typeof value.snapshots === 'object' ? { ...value.snapshots } : {},
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 跨天了：上一轮还在记 prevDay 那一天，现在已经是 dayId，把 prevDay 归档。
+ * 完整的窗口记录最准（30 分钟一采、计数器回退也处理过），已有就不动；
+ * 窗口在当天中途才开始累计（worker 当天才部署/恢复）的标 partial，回填算出完整值时会覆盖。
+ */
+function archiveFinishedDay(daily, prevDay, dayId) {
+  if (!prevDay || !prevDay.id || prevDay.id === dayId) return
+  const partial = prevDay.startedAt - midnightTs(prevDay.id) > 3600000
+  const existing = daily.days[prevDay.id]
+  if (existing && (partial || (!existing.partial && existing.source !== 'snapshot'))) return
+  const entry = { received: prevDay.received, transmitted: prevDay.transmitted }
+  if (partial) entry.partial = true
+  daily.days[prevDay.id] = entry
+}
+
+/** 某时刻之前最后一条计数器。agent_query_dynamic_summary 的 {timestamp_to, last} 精确取一条，几百字节 */
+async function fetchSnapshot(uuid, ts, token) {
+  const rows = await call('agent_query_dynamic_summary', {
+    query: { fields: DYNAMIC_FIELDS, condition: [{ uuid }, { timestamp_to: ts }, { last: null }] },
+  }, token)
+  const row = Array.isArray(rows) ? rows[0] : null
+  if (!row) return null
+  const received = validTotal(row.total_received)
+  const transmitted = validTotal(row.total_transmitted)
+  if (received == null && transmitted == null) return null
+  return { received: received ?? 0, transmitted: transmitted ?? 0, ts: row.timestamp }
+}
+
+/**
+ * 回填：最近 BACKFILL_DAYS 天里没有完整记录的日期，用相邻两个零点的计数器快照做差。
+ * 快照近的先查，图表右边先有数据；单轮最多查 BACKFILL_FETCH_PER_RUN 个，查失败就等下一轮。
+ */
+async function backfillDaily(daily, uuid, dayId, token) {
+  const gaps = []
+  for (let k = 1; k <= BACKFILL_DAYS; k++) {
+    const id = shiftDayId(dayId, -k)
+    const existing = daily.days[id]
+    if (!existing || existing.partial) gaps.push(id)
+  }
+  const needed = []
+  for (const id of gaps) {
+    for (const sid of [id, shiftDayId(id, 1)]) {
+      if (daily.snapshots[sid] === undefined && !needed.includes(sid)) needed.push(sid)
+    }
+  }
+  for (const sid of needed.slice(0, BACKFILL_FETCH_PER_RUN)) {
+    try {
+      daily.snapshots[sid] = await fetchSnapshot(uuid, midnightTs(sid), token)
+    } catch {
+      break
+    }
+  }
+  for (const id of gaps) {
+    const from = daily.snapshots[id]
+    const to = daily.snapshots[shiftDayId(id, 1)]
+    if (!from || !to) continue
+    const entry = {
+      received: trafficDelta(to.received, from.received),
+      transmitted: trafficDelta(to.transmitted, from.transmitted),
+      source: 'snapshot',
+    }
+    // 计数器回退过（重启）：差值算不出，退而取重启后的累计值，偏小，标出来
+    if (to.received < from.received || to.transmitted < from.transmitted) {
+      entry.received = to.received
+      entry.transmitted = to.transmitted
+      entry.reset = true
+    }
+    daily.days[id] = entry
+  }
+}
+
+/** 裁掉过老的历史和快照；id 是 YYYY-MM-DD，字符串比较即日期比较 */
+function pruneDaily(daily, dayId) {
+  const minDay = shiftDayId(dayId, -DAILY_KEEP_DAYS)
+  const minSnapshot = shiftDayId(dayId, -(BACKFILL_DAYS + 1))
+  for (const id of Object.keys(daily.days)) {
+    if (id < minDay || id >= dayId) delete daily.days[id]
+  }
+  for (const id of Object.keys(daily.snapshots)) {
+    if (id < minSnapshot) delete daily.snapshots[id]
+  }
+}
+
 function resolveToken(params = {}, env = {}) {
   return params.token || env.DEFAULT_TOKEN || DEFAULT_TOKEN
 }
@@ -300,13 +425,19 @@ async function syncMonthlyTraffic(params = {}, env = {}) {
       namespace_key: chunk.flatMap(t => [
         { namespace: t.row.uuid, key: t.cycleKey },
         { namespace: t.row.uuid, key: TRAFFIC_WINDOW_KEY },
+        { namespace: t.row.uuid, key: TRAFFIC_DAILY_KEY },
       ]),
     }, token)
-    // 靠记录结构认领（窗口有 day/month，周期桶有 cycleId），不依赖后端回显 KV key——
+    // 靠记录结构认领（每日历史有 days，窗口有 day/month，周期桶有 cycleId），不依赖后端回显 KV key——
     // 认不出来就等于丢基线，代价和读失败一样大
     for (const r of storedRows || []) {
       const t = r && r.namespace ? targetByUuid.get(r.namespace) : null
       if (!t) continue
+      const daily = parseDaily(r.value)
+      if (daily) {
+        t.daily = daily
+        continue
+      }
       const windows = parseWindows(r.value)
       if (windows.day || windows.month) {
         t.windows = windows
@@ -318,7 +449,8 @@ async function syncMonthlyTraffic(params = {}, env = {}) {
   }
 
   let updated = 0
-  await inBatches(targets, WRITE_CONCURRENCY, async ({ row, cycleId, cycleKey, cycleRecord, windows }) => {
+  let dailyUpdated = 0
+  await inBatches(targets, WRITE_CONCURRENCY, async ({ row, cycleId, cycleKey, cycleRecord, windows, daily }) => {
     const nextCycle = advanceRecord(cycleRecord ?? createRecord(row, cycleId, now), row, now)
 
     const prev = windows || {}
@@ -326,6 +458,14 @@ async function syncMonthlyTraffic(params = {}, env = {}) {
       day: advanceWindow(prev.day, dayId, row, now),
       month: advanceWindow(prev.month, monthId, row, now),
     }
+
+    // 每日历史：归档昨天 → 回填缺口 → 裁掉过老的。一天只变一次，没变就不写，省一次往返
+    const nextDaily = daily ?? { days: {}, snapshots: {} }
+    const dailyBefore = JSON.stringify(nextDaily)
+    archiveFinishedDay(nextDaily, prev.day, dayId)
+    await backfillDaily(nextDaily, row.uuid, dayId, token)
+    pruneDaily(nextDaily, dayId)
+    const dailyChanged = JSON.stringify(nextDaily) !== dailyBefore
 
     await Promise.all([
       call('kv_set_value', {
@@ -338,11 +478,19 @@ async function syncMonthlyTraffic(params = {}, env = {}) {
         key: TRAFFIC_WINDOW_KEY,
         value: JSON.stringify(nextWindows),
       }, token),
+      dailyChanged
+        ? call('kv_set_value', {
+            namespace: row.uuid,
+            key: TRAFFIC_DAILY_KEY,
+            value: JSON.stringify({ ...nextDaily, updatedAt: now }),
+          }, token)
+        : null,
     ])
     updated++
+    if (dailyChanged) dailyUpdated++
   })
 
-  return { updated, total: uuids.length, dayId, monthId }
+  return { updated, dailyUpdated, total: uuids.length, dayId, monthId }
 }
 
 export default {
