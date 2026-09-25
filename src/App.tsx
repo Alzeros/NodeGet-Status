@@ -693,8 +693,10 @@ export function App() {
                     <WorldMap
                       nodes={list}
                       statuses={stableStatuses}
-                      latencyTracks={latencyTracks}
-                      onOpen={setSelected}
+                      onPickRegion={code => {
+                        setActiveRegion(code)
+                        changeView('cards')
+                      }}
                     />
                   </Suspense>
                 )}
