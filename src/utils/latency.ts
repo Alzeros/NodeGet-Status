@@ -18,7 +18,7 @@ export function latencyColor(name: string) {
   return COLORS[h % COLORS.length]
 }
 
-function normalizeTs(ts: number) {
+export function normalizeTs(ts: number) {
   return ts < 1_000_000_000_000 ? ts * 1000 : ts
 }
 

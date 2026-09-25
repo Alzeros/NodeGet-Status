@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { taskQuery } from '../api/methods'
 import type { BackendPool } from '../api/pool'
 import type { TaskQueryResult } from '../types'
+import { mergeLatencyRows, nextFetchWindow } from '../utils/latencyBuffer'
+import type { LatencyBuffer } from '../utils/latencyBuffer'
 
 export type LatencyTimeRange = '1h' | '6h' | '24h'
 
@@ -24,7 +26,8 @@ function clean(rows: TaskQueryResult[] | undefined): TaskQueryResult[] {
 }
 
 // 按窗口 [from, to] 拉数据；如果某次返回打满 PAGE_MAX_ROWS，
-// 说明被后端上限截断，翻页继续直到窗口覆盖完整或翻页上限
+// 说明被后端上限截断，翻页继续直到窗口覆盖完整或翻页上限。
+// 查询失败直接抛出：结果要并入增量缓存，把失败当成"这段没数据"会在缓存里留下永久空洞
 async function queryFull(
   entry: any,
   uuid: string,
@@ -40,7 +43,7 @@ async function queryFull(
       entry.client,
       [{ uuid }, { timestamp_from_to: [cursorFrom, window[1]] }, { type }],
       QUERY_TIMEOUT_MS,
-    ).catch(() => [] as TaskQueryResult[])
+    )
     if (isCancelled()) break
     if (rows.length === 0) break
     all.push(...rows)
@@ -75,31 +78,49 @@ export function useNodeLatency(
     const isCancelled = () => cancelled
 
     const { windowMs, refreshMs } = TIME_RANGES[timeRange]
+    // 首轮拉满窗口，之后只补增量（见 latencyBuffer）；换节点或时间范围时 effect 重跑，缓存随之清空
+    let pingBuf: LatencyBuffer | undefined
+    let tcpBuf: LatencyBuffer | undefined
+    let busy = false
 
     const fetchOnce = async () => {
+      // 后台标签页不刷，切回前台由 onVisible 补一轮；上一轮没跑完也不叠加
+      if (document.hidden || busy) return
+      busy = true
       const now = Date.now()
-      const window: [number, number] = [now - windowMs, now]
       setLoading(true)
 
       const [pingResult, tcpResult] = await Promise.allSettled([
-        queryFull(entry, uuid, window, 'ping', isCancelled),
-        queryFull(entry, uuid, window, 'tcp_ping', isCancelled),
+        queryFull(entry, uuid, nextFetchWindow(pingBuf, now, windowMs), 'ping', isCancelled),
+        queryFull(entry, uuid, nextFetchWindow(tcpBuf, now, windowMs), 'tcp_ping', isCancelled),
       ])
+      busy = false
 
       if (cancelled) return
+      // 失败的一路保持旧缓存和旧数据，下一轮从旧截止时间补拉
       if (pingResult.status === 'fulfilled') {
-        setPingData(clean(pingResult.value))
+        pingBuf = mergeLatencyRows(pingBuf, pingResult.value, now, windowMs)
+        setPingData(clean(pingBuf.rows))
       }
-      if (tcpResult.status === 'fulfilled') setTcpData(clean(tcpResult.value))
+      if (tcpResult.status === 'fulfilled') {
+        tcpBuf = mergeLatencyRows(tcpBuf, tcpResult.value, now, windowMs)
+        setTcpData(clean(tcpBuf.rows))
+      }
       setLoading(false)
       setInitialized(true)
     }
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') fetchOnce()
+    }
+    document.addEventListener('visibilitychange', onVisible)
 
     fetchOnce()
     const timer = setInterval(fetchOnce, refreshMs)
     return () => {
       cancelled = true
       clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
     }
   }, [pool, source, uuid, timeRange])
 

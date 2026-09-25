@@ -4,6 +4,8 @@ import { BackendPool } from '../api/pool'
 import { dynamicSummaryMulti, kvGetMulti, listAgentUuids, staticDataMulti, taskQuery } from '../api/methods'
 import { buildLatencyTracks } from '../utils/latency'
 import type { LatencyTracks } from '../utils/latency'
+import { mergeLatencyRows, nextFetchWindow } from '../utils/latencyBuffer'
+import type { LatencyBuffer } from '../utils/latencyBuffer'
 import { billedTraffic } from '../utils/derive'
 import { isOnline } from '../utils/status'
 import { clampResetDay, currentCycleId } from '../utils/trafficCycle'
@@ -61,6 +63,7 @@ const META_KEYS = [
 const DYN_INTERVAL_MS = 2000
 const LATENCY_INTERVAL_MS = 30_000
 const LATENCY_QUERY_TIMEOUT = 10_000
+const LATENCY_WINDOW_MS = 24 * 60 * 60 * 1000
 const HISTORY_LIMIT = 60
 const TRAFFIC_CYCLE_KEY_PREFIX = 'metadata_traffic_cycle:'
 // 自然日/自然月窗口，由 scripts/monthly-traffic-worker.js 写入。
@@ -479,41 +482,54 @@ export function useNodes(config: SiteConfig | null) {
       })
     }
 
+    // 每节点一份 24h 原始行缓存：首轮拉满，之后只补增量（见 latencyBuffer）
+    const latencyBufs = new Map<string, LatencyBuffer>()
+    let latencyBusy = false
+
     const tickLatency = async () => {
-      if (!pool) return
+      // 后台标签页不刷，切回前台由 onVisible 补一轮；上一轮没跑完也不叠加，免得把慢后端越压越死
+      if (!pool || document.hidden || latencyBusy) return
+      latencyBusy = true
       const now = Date.now()
-      const window: [number, number] = [now - 24 * 60 * 60 * 1000, now]
       const updates = new Map<string, LatencyTracks>()
 
-      await Promise.allSettled(
-        pool.entries.map(async entry => {
-          const uuids = sourceUuids.get(entry.name) || []
-          if (!uuids.length) return
+      try {
+        await Promise.allSettled(
+          pool.entries.map(async entry => {
+            const uuids = sourceUuids.get(entry.name) || []
+            if (!uuids.length) return
 
-          const batchSize = 20
-          for (let i = 0; i < uuids.length; i += batchSize) {
-            const batch = uuids.slice(i, i + batchSize)
-            const results = await Promise.allSettled(
-              batch.map(async uuid => {
-                const rows = await taskQuery(
-                  entry.client,
-                  [{ uuid }, { timestamp_from_to: window }, { type: 'ping' }, { limit: 6000 }],
-                  LATENCY_QUERY_TIMEOUT,
-                )
-                const agent = agentsRef.current.get(uuid)
-                const region = agent?.meta?.region
-                const tracks = buildLatencyTracks(rows, region, 24, 3600000)
-                return { uuid, tracks, hasData: rows.length > 0 }
-              }),
-            )
-            for (const r of results) {
-              if (r.status === 'fulfilled') {
-                updates.set(r.value.uuid, r.value.hasData ? r.value.tracks : {})
+            const batchSize = 20
+            for (let i = 0; i < uuids.length; i += batchSize) {
+              const batch = uuids.slice(i, i + batchSize)
+              const results = await Promise.allSettled(
+                batch.map(async uuid => {
+                  const buf = latencyBufs.get(uuid)
+                  const rows = await taskQuery(
+                    entry.client,
+                    [{ uuid }, { timestamp_from_to: nextFetchWindow(buf, now, LATENCY_WINDOW_MS) }, { type: 'ping' }, { limit: 6000 }],
+                    LATENCY_QUERY_TIMEOUT,
+                  )
+                  // 失败的节点保持旧缓存不动，下一轮从旧截止时间补拉，不会漏段
+                  const next = mergeLatencyRows(buf, rows, now, LATENCY_WINDOW_MS)
+                  latencyBufs.set(uuid, next)
+                  const agent = agentsRef.current.get(uuid)
+                  const region = agent?.meta?.region
+                  const tracks = buildLatencyTracks(next.rows, region, 24, 3600000)
+                  return { uuid, tracks, hasData: next.rows.length > 0 }
+                }),
+              )
+              for (const r of results) {
+                if (r.status === 'fulfilled') {
+                  updates.set(r.value.uuid, r.value.hasData ? r.value.tracks : {})
+                }
               }
             }
-          }
-        }),
-      )
+          }),
+        )
+      } finally {
+        latencyBusy = false
+      }
 
       if (updates.size > 0) {
         setLatencyTracks(prev => new Map([...prev, ...updates]))
@@ -531,7 +547,9 @@ export function useNodes(config: SiteConfig | null) {
       })
 
     const onVisible = () => {
-      if (document.visibilityState === 'visible') tickDynamic()
+      if (document.visibilityState !== 'visible') return
+      tickDynamic()
+      tickLatency().catch(() => {})
     }
     document.addEventListener('visibilitychange', onVisible)
 
