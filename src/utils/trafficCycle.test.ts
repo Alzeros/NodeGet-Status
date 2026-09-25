@@ -153,7 +153,8 @@ describe('resetCountdownLabel', () => {
   test('不足 24 小时降级到小时，不足 1 小时降级到分钟', () => {
     expect(resetCountdownLabel(23 * 3600000 + 59 * 60000)).toBe('23小时')
     expect(resetCountdownLabel(3600000)).toBe('1小时')
-    expect(resetCountdownLabel(90 * 60000)).toBe('1分钟')
+    expect(resetCountdownLabel(59 * 60000)).toBe('59分钟')
+    expect(resetCountdownLabel(90 * 1000)).toBe('1分钟')
     // 不足 1 分钟也显示 1分钟，不出现"0分钟"这种读起来像已重置的文案
     expect(resetCountdownLabel(30000)).toBe('1分钟')
   })
