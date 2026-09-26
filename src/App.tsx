@@ -8,10 +8,11 @@ import { Navbar } from './components/Navbar'
 import { Footer } from './components/Footer'
 import { GlobalStats, CircularProgress } from './components/GlobalStats'
 import { NodeCard } from './components/NodeCard'
-import { MiniCard } from './components/MiniCard'
 import { NodeTable } from './components/NodeTable'
+import { LayoutToggle } from './components/LayoutToggle'
+import { Search } from './components/Search'
+import { SortMenu } from './components/SortMenu'
 import { NodeDetail } from './components/NodeDetail'
-import { ConsoleView } from './components/ConsoleView'
 import { StatsView } from './components/StatsView'
 import { NodeCardSkeletonGrid } from './components/NodeCardSkeleton'
 import { TagFilter } from './components/TagFilter'
@@ -22,24 +23,31 @@ const WorldMap = lazy(() =>
   import('./components/WorldMap').then(m => ({ default: m.WorldMap })),
 )
 import { useStableStatus } from './hooks/useStableStatus'
-import { useMediaQuery } from './hooks/useMediaQuery'
 import { deriveUsage, displayName } from './utils/derive'
 import { avgLatency } from './utils/latency'
 import { remainingDays } from './utils/cost'
 import { computeGlobalStats } from './utils/globalStats'
-import { SORT_NATURAL_DIR } from './components/SortMenu'
+import { SORT_NATURAL_DIR } from './utils/tableSort'
 import { isEnabledView } from './components/ViewToggle'
-import type { Sort, SortDir, View } from './types'
+import type { NodeLayout, Sort, SortDir, View } from './types'
 import type { NodeStatusCategory } from './utils/stableStatus'
 
 const DEFAULT_LOGO = `${import.meta.env.BASE_URL}logo.png`
 const VIEW_KEY = 'nodeget.view'
+const LAYOUT_KEY = 'nodeget.layout'
 const SORT_KEY = 'nodeget.sort'
 const SORT_DIR_KEY = 'nodeget.sortDir'
 
 function initialView(): View {
   const v = localStorage.getItem(VIEW_KEY)
-  return isEnabledView(v) ? v : 'cards'
+  return isEnabledView(v) ? v : 'nodes'
+}
+
+function initialLayout(): NodeLayout {
+  const v = localStorage.getItem(LAYOUT_KEY)
+  if (v === 'cards' || v === 'table') return v
+  // 旧版把卡片/表格存成顶层视图：沿用用户上次停在哪种
+  return localStorage.getItem(VIEW_KEY) === 'table' ? 'table' : 'cards'
 }
 
 function initialSort(): Sort {
@@ -101,6 +109,7 @@ export function App() {
   }, [nodes, stableStatuses])
 
   const [view, setView] = useState<View>(initialView)
+  const [layout, setLayout] = useState<NodeLayout>(initialLayout)
   const [sort, setSort] = useState<Sort>(initialSort)
   const [sortDir, setSortDir] = useState<SortDir>(initialSortDir)
   const [query, setQuery] = useState('')
@@ -112,19 +121,16 @@ export function App() {
   const [statusExpanded, setStatusExpanded] = useState(true)
   // 移动端筛选面板默认收起：地区 chip 常有 10+ 个，展开会把节点卡挤出首屏
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
-  // 工作台右栏是紧凑仪表盘，长尾内容（Ping/TCP 明细、系统信息、费用）在整页详情里，
-  // 由右栏的「查看完整详情」临时切过去，收起后仍回到工作台
-  const [fullDetail, setFullDetail] = useState(false)
-
-  // 工作台与地图是满幅视图：不占左侧筛选栏，筛选改用顶部折叠面板。
-  // 两栏（节点栏 + 详情）在 lg 起放得下，更窄则退化为纯列表 + 整页详情
-  const isLg = useMediaQuery('(min-width: 1024px)')
-  const consoleEmbedded = view === 'console' && isLg && !fullDetail
-  const fullBleed = view === 'console' || view === 'map'
+  // 地图是满幅视图：不占左侧筛选栏，筛选改用顶部折叠面板
+  const fullBleed = view === 'map'
 
   useEffect(() => {
     localStorage.setItem(VIEW_KEY, view)
   }, [view])
+
+  useEffect(() => {
+    localStorage.setItem(LAYOUT_KEY, layout)
+  }, [layout])
 
   useEffect(() => {
     localStorage.setItem(SORT_KEY, sort)
@@ -135,10 +141,8 @@ export function App() {
   }, [sortDir])
 
   useEffect(() => {
-    if (selected && !consoleEmbedded) {
-      window.scrollTo({ top: 0, behavior: 'instant' })
-    }
-  }, [selected, consoleEmbedded])
+    if (selected) window.scrollTo({ top: 0, behavior: 'instant' })
+  }, [selected])
 
   useEffect(() => {
     const onHash = () => setSelected(readHash())
@@ -189,6 +193,9 @@ export function App() {
     if (activeRegion && !regions.list.some(r => r.code === activeRegion)) setActiveRegion(null)
   }, [regions, activeRegion])
 
+  // 搜索框只在节点页：分析和地图不显示它，也就不该被一个看不见的搜索词悄悄筛掉机器
+  const activeQuery = view === 'nodes' ? query.trim().toLowerCase() : ''
+
   const list = useMemo(() => {
     let arr = [...nodes.values()].filter(n => !n.meta?.hidden)
     if (activeTag) arr = arr.filter(n => n.meta?.tags?.includes(activeTag))
@@ -199,7 +206,7 @@ export function App() {
       arr = arr.filter(n => (stableStatuses.get(n.uuid) ?? 'normal') === activeStatus)
     }
 
-    const q = query.trim().toLowerCase()
+    const q = activeQuery
     if (q) {
       arr = arr.filter(n => {
         const hay = [
@@ -271,7 +278,7 @@ export function App() {
 
       return cmp || displayName(a).localeCompare(displayName(b))
     })
-  }, [nodes, query, activeTag, activeRegion, activeStatus, sort, sortDir, regions, stableStatuses, latencyTracks])
+  }, [nodes, activeQuery, activeTag, activeRegion, activeStatus, sort, sortDir, regions, stableStatuses, latencyTracks])
 
   const filteredStatusCounts = useMemo(() => {
     let arr = [...nodes.values()].filter(n => !n.meta?.hidden)
@@ -279,7 +286,7 @@ export function App() {
     if (activeRegion) {
       arr = arr.filter(n => n.meta?.region?.trim().toUpperCase() === activeRegion)
     }
-    const q = query.trim().toLowerCase()
+    const q = activeQuery
     if (q) {
       arr = arr.filter(n => {
         const hay = [
@@ -296,9 +303,13 @@ export function App() {
       counts[cat]++
     }
     return counts
-  }, [nodes, activeTag, activeRegion, query, stableStatuses])
+  }, [nodes, activeTag, activeRegion, activeQuery, stableStatuses])
 
   const selectedNode = selected ? nodes.get(selected) || null : null
+  const onSort = (v: Sort, d: SortDir) => {
+    setSort(v)
+    setSortDir(d)
+  }
   const clearFilters = () => {
     setQuery('')
     setActiveTag(null)
@@ -306,14 +317,7 @@ export function App() {
     setActiveStatus(null)
   }
 
-  // 工作台里的选中只是"右栏显示哪台"的视图内部状态；
-  // 离开工作台时清掉，否则切回卡片会直接落在整页详情上。
-  // 反方向（卡片详情 → 工作台）保留选中，成为右栏当前项。
-  const changeView = (v: View) => {
-    setFullDetail(false)
-    if (view === 'console' && v !== 'console') setSelected(null)
-    setView(v)
-  }
+  const changeView = (v: View) => setView(v)
 
   if (configError) {
     return (
@@ -347,6 +351,19 @@ export function App() {
   const showNoNodes = !hasNodes && (!loading || hasErrors)
   // 移动端折叠面板收起时，用角标提示当前生效的筛选条数
   const activeFilterCount = [activeRegion, activeTag, activeStatus].filter(Boolean).length
+  const isFiltered = activeFilterCount > 0 || query.trim() !== ''
+  const emptyState = (
+    <div className="py-20 flex flex-col items-center gap-3 text-center text-muted-foreground">
+      <div className="text-sm">暂无匹配节点</div>
+      <button
+        type="button"
+        onClick={clearFilters}
+        className="rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:bg-accent transition-colors"
+      >
+        清除筛选
+      </button>
+    </div>
+  )
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -354,16 +371,8 @@ export function App() {
       <Navbar
         siteName={config.user_preferences.site_name || '你没设置'}
         logo={logo}
-        query={query}
-        onQuery={setQuery}
         view={view}
         onView={changeView}
-        sort={sort}
-        sortDir={sortDir}
-        onSort={(v, d) => {
-          setSort(v)
-          setSortDir(d)
-        }}
       />
 
       <main className="flex-1 w-full max-w-[1600px] mx-auto px-6 sm:px-8 lg:px-12 xl:px-16 py-6 sm:py-8">
@@ -501,7 +510,7 @@ export function App() {
 
           {/* 右侧主内容区 */}
           <div className="flex-1 min-w-0">
-            {!selectedNode || consoleEmbedded ? (
+            {!selectedNode ? (
               <div className="flex flex-col gap-6 animate-in fade-in duration-200">
                 {/* 小屏幕下显示原始堆叠布局；满幅视图自带聚合信息，不再重复 */}
                 {hasNodes && !fullBleed && (
@@ -523,7 +532,7 @@ export function App() {
                 {hasNodes && (
                   <div className={fullBleed ? undefined : 'lg:hidden'}>
                     {/* 地区/标签/状态三组筛选收进一个可折叠面板：移动端用它替代侧边栏，
-                        工作台/地图这类满幅视图则在所有宽度下都用它。
+                        地图这类满幅视图则在所有宽度下都用它。
                         地区 chip 常有 10+ 个，平铺会把内容挤到首屏之外。 */}
                     <button
                       type="button"
@@ -632,49 +641,43 @@ export function App() {
                   <div className="py-20 text-center text-muted-foreground">暂无节点</div>
                 )}
 
-                {noResults && (
-                  <div className="py-20 flex flex-col items-center gap-3 text-center text-muted-foreground">
-                    <div className="text-sm">暂无匹配节点</div>
-                    <button
-                      type="button"
-                      onClick={clearFilters}
-                      className="rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:bg-accent transition-colors"
-                    >
-                      清除筛选
-                    </button>
-                  </div>
-                )}
+                {noResults && view !== 'nodes' && emptyState}
 
-                {hasResults && !hydrating && view === 'cards' && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {list.map(n => (
-                      <NodeCard key={n.uuid} node={n} latencyTracks={latencyTracks.get(n.uuid)} status={stableStatuses.get(n.uuid)} counters={stableCounters.get(n.uuid)} />
-                    ))}
+                {hasNodes && !hydrating && view === 'nodes' && (
+                  <div className="flex flex-col gap-3">
+                    {/* 搜索和排序只有这一页用得上，从导航栏挪到这里，和布局开关一排；
+                        搜不到时这行也得在，不然没法改搜索词 */}
+                    <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                      <Search value={query} onChange={setQuery} className="w-full sm:w-64 md:w-64" />
+                      <SortMenu value={sort} dir={sortDir} onChange={onSort} align="left" />
+                      <span className="ml-auto text-xs text-muted-foreground tabular-nums">
+                        {isFiltered ? `显示 ${list.length} / ${regions.total} 台` : `共 ${list.length} 台`}
+                      </span>
+                      <LayoutToggle value={layout} onChange={setLayout} />
+                    </div>
+                    {noResults ? (
+                      emptyState
+                    ) : layout === 'cards' ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {list.map(n => (
+                          <NodeCard key={n.uuid} node={n} latencyTracks={latencyTracks.get(n.uuid)} status={stableStatuses.get(n.uuid)} counters={stableCounters.get(n.uuid)} />
+                        ))}
+                      </div>
+                    ) : (
+                      <NodeTable
+                        nodes={list}
+                        latencyTracks={latencyTracks}
+                        statuses={stableStatuses}
+                        counters={stableCounters}
+                        sort={sort}
+                        sortDir={sortDir}
+                        onSort={onSort}
+                        onOpen={setSelected}
+                        showSource={(config.site_tokens?.length ?? 0) > 1}
+                      />
+                    )}
                   </div>
                 )}
-                {hasResults && !hydrating && view === 'console' && (
-                  <ConsoleView
-                    nodes={list}
-                    latencyTracks={latencyTracks}
-                    statuses={stableStatuses}
-                    counters={stableCounters}
-                    selectedNode={consoleEmbedded ? selectedNode : null}
-                    showSource={(config.site_tokens?.length ?? 0) > 1}
-                    embedded={consoleEmbedded}
-                    onOpenFull={() => {
-                      setFullDetail(true)
-                      window.scrollTo({ top: 0, behavior: 'instant' })
-                    }}
-                  />
-                )}
-                {/* {hasResults && view === 'mini' && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                    {list.map(n => (
-                      <MiniCard key={n.uuid} node={n} latencyTracks={latencyTracks.get(n.uuid)} status={stableStatuses.get(n.uuid)} counters={stableCounters.get(n.uuid)} />
-                    ))}
-                  </div>
-                )} */}
-                {/* {hasResults && view === 'table' && <NodeTable nodes={list} onOpen={setSelected} statuses={stableStatuses} counters={stableCounters} />} */}
                 {hasResults && !hydrating && view === 'stats' && (
                   <StatsView
                     nodes={list}
@@ -695,7 +698,7 @@ export function App() {
                       statuses={stableStatuses}
                       onPickRegion={code => {
                         setActiveRegion(code)
-                        changeView('cards')
+                        changeView('nodes')
                       }}
                     />
                   </Suspense>
@@ -722,9 +725,7 @@ export function App() {
               <NodeDetail
                 node={selectedNode}
                 onClose={() => {
-                  // 从工作台点进来的：收起只退回工作台，选中保留在右栏
-                  if (!fullDetail) setSelected(null)
-                  setFullDetail(false)
+                  setSelected(null)
                   window.scrollTo({ top: 0, behavior: 'instant' })
                 }}
                 showSource={(config.site_tokens?.length ?? 0) > 1}

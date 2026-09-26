@@ -192,7 +192,10 @@ export interface TaskQueryCondition {
   last?: null
 }
 
-export type View = 'cards' | 'console' | 'mini' | 'table' | 'map' | 'stats'
+export type View = 'nodes' | 'map' | 'stats'
+
+/** 节点页的两种布局：卡片逐台浏览，表格一屏排查 */
+export type NodeLayout = 'cards' | 'table'
 
 export type SortDir = 'asc' | 'desc'
 

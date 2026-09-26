@@ -1,21 +1,18 @@
-import { BarChart3, Check, Columns2, Globe, LayoutGrid } from 'lucide-react'
+import { BarChart3, Check, Globe, Server } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from './ui/button'
 import type { View } from '../types'
 
-const ITEMS: { value: View; label: string; icon: typeof LayoutGrid }[] = [
-  { value: 'cards', label: '卡片', icon: LayoutGrid },
-  { value: 'console', label: '工作台', icon: Columns2 },
+const ITEMS: { value: View; label: string; icon: typeof Server }[] = [
+  { value: 'nodes', label: '节点', icon: Server },
   { value: 'map', label: '地图', icon: Globe },
   { value: 'stats', label: '分析', icon: BarChart3 },
-  // { value: 'mini', label: '迷你', icon: LayoutList },
-  // { value: 'table', label: '表格', icon: Table },
 ]
 
 /**
  * 当前启用的视图集合。App 恢复 localStorage 里的视图时拿它校验——
  * 从前那边是手写的 if 白名单，漏了 'stats'，停在分析页刷新会被弹回卡片页。
- * 注释掉的 mini/table 不在集合里，存量旧值会自然回落到默认视图。
+ * 不在集合里的旧值（卡片/表格已降为节点页的布局，工作台/迷你已删）会回落到节点页。
  */
 const ENABLED_VIEWS = new Set<string>(ITEMS.map(i => i.value))
 

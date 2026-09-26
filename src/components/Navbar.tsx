@@ -1,34 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
-import { Search as SearchIcon, X } from 'lucide-react'
-import { Search } from './Search'
 import { ViewToggle } from './ViewToggle'
 import { ThemeToggle } from './ThemeToggle'
 import { StyleMenu } from './StyleMenu'
-import { SortMenu } from './SortMenu'
-import { Button } from './ui/button'
-import type { Sort, SortDir, View } from '../types'
+import type { View } from '../types'
 
 interface Props {
   siteName: string
   logo?: string
-  query: string
-  onQuery: (v: string) => void
   view: View
   onView: (v: View) => void
-  sort: Sort
-  sortDir: SortDir
-  onSort: (v: Sort, d: SortDir) => void
 }
 
-export function Navbar({ siteName, logo, query, onQuery, view, onView, sort, sortDir, onSort }: Props) {
-  const [searchOpen, setSearchOpen] = useState(false)
+/** 导航栏只留站点级的东西：视图、样式、主题。搜索和排序只有节点页用得上，在那页的顶栏里 */
+export function Navbar({ siteName, logo, view, onView }: Props) {
   const [stuck, setStuck] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
   const headerRef = useRef<HTMLElement>(null)
-
-  useEffect(() => {
-    if (searchOpen) inputRef.current?.focus()
-  }, [searchOpen])
 
   useEffect(() => {
     const onScroll = () => {
@@ -58,33 +44,9 @@ export function Navbar({ siteName, logo, query, onQuery, view, onView, sort, sor
           <span className="font-semibold tracking-wide truncate">{siteName}</span>
         </a>
         <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
-          <div className="hidden sm:block">
-            <Search value={query} onChange={onQuery} />
-          </div>
-          <Button
-            variant="outline"
-            size="icon"
-            className="sm:hidden"
-            onClick={() => setSearchOpen(o => !o)}
-            aria-label={searchOpen ? '关闭搜索' : '搜索'}
-          >
-            {searchOpen ? <X className="h-4 w-4" /> : <SearchIcon className="h-4 w-4" />}
-          </Button>
-          <SortMenu value={sort} dir={sortDir} onChange={onSort} />
           <ViewToggle value={view} onChange={onView} />
           <StyleMenu />
           <ThemeToggle />
-        </div>
-      </div>
-
-      <div
-        aria-hidden={!searchOpen}
-        className={`sm:hidden overflow-hidden transition-all duration-150 ease-out ${
-          searchOpen ? 'max-h-20 opacity-100' : 'max-h-0 opacity-0'
-        }`}
-      >
-        <div className="px-4 pt-1 pb-3">
-          <Search ref={inputRef} value={query} onChange={onQuery} className="w-full" />
         </div>
       </div>
     </header>

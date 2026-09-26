@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp } from 'lucide-react'
 import { Button } from './ui/button'
+import { cn } from '../utils/cn'
+import { nextSort } from '../utils/tableSort'
 import type { Sort, SortDir } from '../types'
 
 const OPTIONS: { value: Sort; label: string }[] = [
@@ -20,32 +22,17 @@ const OPTIONS: { value: Sort; label: string }[] = [
   { value: 'expire', label: '到期时间' },
 ]
 
-/** 每个排序项首次选中时的自然方向：数值类"压力大在前"是降序，身份/到期类是升序 */
-export const SORT_NATURAL_DIR: Record<Sort, SortDir> = {
-  default: 'asc',
-  name: 'asc',
-  region: 'asc',
-  status: 'desc',
-  latency: 'desc',
-  cpu: 'desc',
-  mem: 'desc',
-  disk: 'desc',
-  netIn: 'desc',
-  netOut: 'desc',
-  uptime: 'desc',
-  traffic: 'desc',
-  trafficPct: 'desc',
-  expire: 'asc',
-}
-
 export function SortMenu({
   value,
   dir,
   onChange,
+  align = 'right',
 }: {
   value: Sort
   dir: SortDir
   onChange: (v: Sort, d: SortDir) => void
+  /** 菜单贴按钮的哪一边展开：导航栏里靠右，节点页顶栏里按钮靠左，得往右展开 */
+  align?: 'left' | 'right'
 }) {
   const [open, setOpen] = useState(false)
   const [show, setShow] = useState(false)
@@ -92,16 +79,17 @@ export function SortMenu({
           onAnimationEnd={() => {
             if (!open) setShow(false)
           }}
-          className="absolute right-0 mt-1 w-36 origin-top-right z-20 rounded-md border bg-popover shadow-md py-1 fill-mode-forwards data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95"
+          className={cn(
+            'absolute mt-1 w-36 z-20 rounded-md border bg-popover shadow-md py-1 fill-mode-forwards data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95',
+            align === 'left' ? 'left-0 origin-top-left' : 'right-0 origin-top-right',
+          )}
         >
           {OPTIONS.map(o => (
             <button
               key={o.value}
               type="button"
               onClick={() => {
-                // 点当前生效项 = 翻转方向；点新项 = 回到该项的自然方向
-                if (o.value === value) onChange(value, dir === 'asc' ? 'desc' : 'asc')
-                else onChange(o.value, SORT_NATURAL_DIR[o.value])
+                onChange(...nextSort(value, dir, o.value))
                 setOpen(false)
               }}
               className="w-full flex items-center justify-between px-2.5 py-1.5 text-sm hover:bg-accent"
