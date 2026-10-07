@@ -297,6 +297,7 @@ function KpiTile({
   label,
   value,
   sub,
+  subDetail,
   iconBg,
   valueClass,
 }: {
@@ -304,6 +305,7 @@ function KpiTile({
   label: string
   value: string
   sub?: string
+  subDetail?: string
   iconBg: string
   valueClass?: string
 }) {
@@ -317,7 +319,15 @@ function KpiTile({
         <div className={cn('text-xl font-bold tabular-nums leading-tight mt-0.5', valueClass)}>
           {value}
         </div>
-        {sub && <div className="text-[10px] text-muted-foreground/70 truncate mt-0.5">{sub}</div>}
+        {sub && (
+          <div
+            className={cn('text-[10px] text-muted-foreground/70 mt-0.5', subDetail ? 'whitespace-normal break-words' : 'truncate')}
+            title={subDetail ? `${sub} · ${subDetail}` : sub}
+          >
+            <div>{sub}</div>
+            {subDetail && <div>{subDetail}</div>}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -586,9 +596,10 @@ export function StatsView({ nodes, statuses, showSource }: Props) {
           value={`${targetSymbol}${monthlyCost.total.toFixed(0)}`}
           sub={
             fx
-              ? `${monthlyCost.count} 台计费 · 已按汇率折算（${fx.source} ${fx.date}）`
+              ? `${monthlyCost.count} 台计费 · 已按汇率折算`
               : '正在获取汇率…'
           }
+          subDetail={fx ? `${fx.source} ${fx.date}` : undefined}
         />
         <KpiTile
           icon={ShieldAlert}
