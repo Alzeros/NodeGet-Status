@@ -30,6 +30,11 @@ export function localDateId(now: Date = new Date()) {
   return fmt(now.getFullYear(), now.getMonth(), now.getDate())
 }
 
+/** 固定 UTC+8 自然日，不依赖浏览器/主控时区，也不随夏令时变化。 */
+export function utc8DateId(now: Date = new Date()) {
+  return new Date(now.getTime() + 8 * 3600000).toISOString().slice(0, 10)
+}
+
 /** 日期 id 前后挪 delta 天。id 本身不带时区，按 UTC 算，避开本地夏令时切换日的 23/25 小时 */
 export function shiftDayId(id: string, delta: number) {
   const [y, m, d] = id.split('-').map(Number)

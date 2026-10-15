@@ -9,23 +9,28 @@
  *
  * 每次采样写三个 KV：
  *   metadata_traffic_cycle:<周期起始日>  按各机器自己的重置日切片，供额度/剩余量展示
- *   metadata_traffic_window             自然日 + 自然月两个窗口，供跨机器可比的流量榜单
- *   metadata_traffic_daily              已结束的自然日逐日用量，供每日流量柱状图
- * 窗口桶只从本 worker 更新后开始累计；每日历史会用主控保留的动态数据回填最近几周。
+ *   metadata_traffic_window             UTC+8 日窗口 + 原主控本地自然月窗口
+ *   metadata_traffic_daily_utc8          已结束的 UTC+8 日用量，供每日流量柱状图
+ * 日桶按午夜快照拆分；历史用主控保留的动态数据回填。旧 day / 旧每日历史不参与新版统计。
  */
 
 const DEFAULT_TOKEN = ''
 const TRAFFIC_CYCLE_KEY_PREFIX = 'metadata_traffic_cycle:'
 // 自然日/自然月窗口。跟计费周期是两套口径：周期桶回答"这台快超额没"，
 // 窗口桶回答"今天/本月谁跑得多"——所有机器共享同一时间窗，榜单才横向可比。
-// 两个窗口塞进同一个 key：读写各一次，且窗口 id 由主控（而非浏览器）写定，
-// 前端不必猜主控在哪个时区。
+// 窗口仍放在同一个 key；dayUtc8 固定 UTC+8，month 保持主控本地时区。
 const TRAFFIC_WINDOW_KEY = 'metadata_traffic_window'
 const RESET_DAY_KEY = 'metadata_traffic_reset_day'
 // 每日历史：跨天时把前一天的自然日窗口结果归档进 days；空缺的日期用
 // agent_query_dynamic_summary 取相邻两个午夜的计数器做差回填（主控默认只保留 3~4 周动态数据）。
 // 整段历史放一个 key：前端一台读一次就够，不用按日期拼 key。
-const TRAFFIC_DAILY_KEY = 'metadata_traffic_daily'
+const TRAFFIC_DAILY_KEY = 'metadata_traffic_daily_utc8'
+const DAY_TIME_ZONE = 'UTC+08:00'
+const DAY_OFFSET_MS = 8 * 3600000
+// 午夜值只是在采样精度内的近似；超出 5 分钟的旧记录不能充当边界。
+const SNAPSHOT_MAX_AGE_MS = 5 * 60 * 1000
+// 最近两个已结束日依赖的午夜仍可能迟到；更老的真实缺失保持负缓存。
+const SNAPSHOT_RETRY_DAYS = 2
 // 历史保留天数，够画一个季度
 const DAILY_KEEP_DAYS = 92
 // 只回填这个范围内的缺口，再往前主控也没有数据了
@@ -35,7 +40,7 @@ const BACKFILL_FETCH_PER_RUN = 12
 const DYNAMIC_FIELDS = ['total_received', 'total_transmitted']
 // 写回时的并发度：节点多时串行跑会把 cron 窗口拖满
 const WRITE_CONCURRENCY = 10
-// 批量读的分片大小（节点数）：每台读 2 个 key，分片是为了限制单个请求体积
+// 批量读的分片大小（节点数）：每台读 3 个 key，分片是为了限制单个请求体积
 const READ_CHUNK = 100
 
 // 流量统计周期：按每台服务器自己的"重置日"（每月几号）切片，而不是日历月。
@@ -80,8 +85,8 @@ function trafficCycleKvKey(cycleId) {
   return `${TRAFFIC_CYCLE_KEY_PREFIX}${cycleId}`
 }
 
-function localDateId(now) {
-  return fmt(now.getFullYear(), now.getMonth(), now.getDate())
+function utc8DateId(now) {
+  return new Date(now.getTime() + DAY_OFFSET_MS).toISOString().slice(0, 10)
 }
 
 function localMonthId(now) {
@@ -154,21 +159,48 @@ function parseWindow(value) {
   }
 }
 
+function validDayId(id) {
+  return typeof id === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(id) && shiftDayId(id, 0) === id
+}
+
+function parseDayWindow(value) {
+  const window = parseWindow(value)
+  if (!window || !validDayId(window.id)) return null
+  if (value.partial || value.reset) window.partial = true
+  if (value.reset) window.reset = true
+  if (Number.isSafeInteger(value.revision) && value.revision > 0) window.revision = value.revision
+  // 内部来源：last* 是每方向最后有效值；_sample 才表示同一时刻的完整样本。
+  window._sample = value._sample === undefined
+    ? { received: window.lastReceived, transmitted: window.lastTransmitted, ts: window.updatedAt }
+    : value._sample
+  if (value._start) window._start = value._start
+  if (value._gaps) window._gaps = true
+  if (value._closed) window._closed = true
+  return window
+}
+
+/** 日窗口修订号与采样时刻独立；载荷变化才升版，忽略 revision 自身和顶层属性顺序。 */
+function reviseDayWindow(previous, next) {
+  if (!next) return next
+  const sameDay = previous?.id === next.id
+  const changed = !sameDay || Object.keys({ ...previous, ...next }).some(key =>
+    key !== 'revision' && JSON.stringify(previous[key]) !== JSON.stringify(next[key]))
+  const revision = sameDay && previous.revision ? previous.revision + (changed ? 1 : 0) : 1
+  return { ...next, revision }
+}
+
 function parseWindows(raw) {
   try {
     const value = typeof raw === 'string' ? JSON.parse(raw) : raw
     if (!value || typeof value !== 'object') return {}
-    return { day: parseWindow(value.day), month: parseWindow(value.month) }
+    // 旧 day 只保留，不作为 UTC+8 的基线，也不继续写入旧口径。
+    return { day: value.day, dayUtc8: parseDayWindow(value.dayUtc8), month: parseWindow(value.month) }
   } catch {
     return {}
   }
 }
 
-/**
- * 推进一个统计窗口。窗口 id 变了（跨日/跨月）就重新起桶，但基线继承上一个桶的
- * lastReceived —— 采样间隔横跨零点的那段流量会记进新窗口，不丢也不重复计。
- * 这也是窗口桶不按日期拆 key 的原因：上一桶的基线就在同一条记录里，零成本拿到。
- */
+/** 自然月维持原有口径：跨月重新起桶，继承上一桶基线，采样间隔整段记入新月。 */
 function advanceWindow(prev, id, row, now) {
   const currentReceived = validTotal(row.total_received)
   const currentTransmitted = validTotal(row.total_transmitted)
@@ -194,117 +226,259 @@ function advanceWindow(prev, id, row, now) {
   }
 }
 
-/** 日期 id 前后挪 delta 天。走本地时区，与窗口 id 同口径 */
+/** UTC 日历运算，不受宿主时区或夏令时影响。 */
 function shiftDayId(id, delta) {
   const [y, m, d] = id.split('-').map(Number)
-  return localDateId(new Date(y, m - 1, d + delta))
+  return new Date(Date.UTC(y, m - 1, d + delta)).toISOString().slice(0, 10)
 }
 
-/** 日期 id 当天的本地零点 */
+/** 日期 id 当天的 UTC+8 零点。 */
 function midnightTs(id) {
   const [y, m, d] = id.split('-').map(Number)
-  return new Date(y, m - 1, d).getTime()
+  return Date.UTC(y, m - 1, d) - DAY_OFFSET_MS
 }
 
 /**
- * metadata_traffic_daily 的结构：
+ * metadata_traffic_daily_utc8 的结构（timeZone 固定 UTC+08:00）：
  *   days      { 'YYYY-MM-DD': { received, transmitted, partial?, reset?, source? } }  已结束的自然日
- *   snapshots { 'YYYY-MM-DD': { received, transmitted, ts } | null }              该日零点前最后一条计数器；
- *                                                                                  null = 查过没有（超出保留期/机器还没接入），不再重查
+ *   snapshots { 'YYYY-MM-DD': { received, transmitted, ts } | null }              合规午夜样本；近期 null 可重试
+ *   _pending  { 'YYYY-MM-DD': dayUtc8 }                                           内部恢复锚点；_closed 表示已定稿边界
+ * dayUtc8 内部字段：_sample=同一时刻完整样本/null，_start=待补午夜的原始基线，_gaps=缺方向标记。
  */
 function parseDaily(raw) {
   try {
     const value = typeof raw === 'string' ? JSON.parse(raw) : raw
-    if (!value || typeof value !== 'object' || !value.days || typeof value.days !== 'object') return null
+    if (!value || value.timeZone !== DAY_TIME_ZONE || !value.days || typeof value.days !== 'object') return null
     return {
+      timeZone: DAY_TIME_ZONE,
       days: { ...value.days },
       snapshots: value.snapshots && typeof value.snapshots === 'object' ? { ...value.snapshots } : {},
+      // _pending 保存未闭合或尚待发布的日窗口，历史写成功后它是失败重跑的权威锚点。
+      _pending: Object.fromEntries(Object.entries(value._pending || {})
+        .filter(([id, window]) => validDayId(id) && window?.id === id && parseDayWindow(window))
+        .map(([id, window]) => [id, parseDayWindow(window)])),
     }
   } catch {
     return null
   }
 }
 
-/**
- * 跨天了：上一轮还在记 prevDay 那一天，现在已经是 dayId，把 prevDay 归档。
- * 完整的窗口记录最准（30 分钟一采、计数器回退也处理过），已有就不动；
- * 窗口在当天中途才开始累计（worker 当天才部署/恢复）的标 partial，回填算出完整值时会覆盖。
- */
-function archiveFinishedDay(daily, prevDay, dayId) {
-  if (!prevDay || !prevDay.id || prevDay.id === dayId) return
-  const partial = prevDay.startedAt - midnightTs(prevDay.id) > 3600000
+/** 日桶只消费时间向前的真实样本；重置或缺字段造成的缺口不能伪装成完整日。 */
+function advanceDayWindow(prev, row) {
+  if (!validTimestamp(row.timestamp) || row.timestamp <= prev.updatedAt) return prev
+  const received = validTotal(row.total_received)
+  const transmitted = validTotal(row.total_transmitted)
+  const reset = (received != null && prev.lastReceived != null && received < prev.lastReceived)
+    || (transmitted != null && prev.lastTransmitted != null && transmitted < prev.lastTransmitted)
+  return {
+    ...prev,
+    received: prev.received + trafficDelta(received, prev.lastReceived),
+    transmitted: prev.transmitted + trafficDelta(transmitted, prev.lastTransmitted),
+    // 跨缺字段保留计数器，才能识别恢复上报后的回退；完整样本来源另存，不能混用。
+    lastReceived: received ?? prev.lastReceived,
+    lastTransmitted: transmitted ?? prev.lastTransmitted,
+    _sample: received != null && transmitted != null ? { received, transmitted, ts: row.timestamp } : null,
+    updatedAt: row.timestamp,
+    ...(received == null || transmitted == null ? { _gaps: true } : {}),
+    ...(reset ? { reset: true } : {}),
+    ...(reset || received == null || transmitted == null ? { partial: true } : {}),
+  }
+}
+
+function archiveFinishedDay(daily, prevDay) {
   const existing = daily.days[prevDay.id]
-  if (existing && (partial || (!existing.partial && existing.source !== 'snapshot'))) return
+  // 完整快照可补齐普通采样缺口，但不能抹掉任何已经观察到的重置。
+  if (existing?.reset && !prevDay.reset) return
+  if (existing && !existing.partial && prevDay.partial && !prevDay.reset) return
   const entry = { received: prevDay.received, transmitted: prevDay.transmitted }
-  if (partial) entry.partial = true
+  if (prevDay.partial) entry.partial = true
+  if (prevDay.reset) entry.reset = true
   daily.days[prevDay.id] = entry
 }
 
-/** 某时刻之前最后一条计数器。agent_query_dynamic_summary 的 {timestamp_to, last} 精确取一条，几百字节 */
+function validTimestamp(ts) {
+  return Number.isFinite(ts) && Number.isFinite(new Date(ts).getTime())
+}
+
+function validSnapshot(snapshot, boundary) {
+  return snapshot && validTimestamp(snapshot.ts)
+    && snapshot.ts <= boundary && boundary - snapshot.ts <= SNAPSHOT_MAX_AGE_MS
+    && validTotal(snapshot.received) != null && validTotal(snapshot.transmitted) != null
+}
+
+/** timestamp_to + last 取边界前最后一条，不代表它恰好落在午夜。 */
 async function fetchSnapshot(uuid, ts, token) {
   const rows = await call('agent_query_dynamic_summary', {
     query: { fields: DYNAMIC_FIELDS, condition: [{ uuid }, { timestamp_to: ts }, { last: null }] },
   }, token)
   const row = Array.isArray(rows) ? rows[0] : null
   if (!row) return null
-  const received = validTotal(row.total_received)
-  const transmitted = validTotal(row.total_transmitted)
-  if (received == null && transmitted == null) return null
-  return { received: received ?? 0, transmitted: transmitted ?? 0, ts: row.timestamp }
+  const snapshot = { received: row.total_received, transmitted: row.total_transmitted, ts: row.timestamp }
+  return validSnapshot(snapshot, ts) ? snapshot : null
 }
 
-/**
- * 回填：最近 BACKFILL_DAYS 天里没有完整记录的日期，用相邻两个零点的计数器快照做差。
- * 快照近的先查，图表右边先有数据；单轮最多查 BACKFILL_FETCH_PER_RUN 个，查失败就等下一轮。
- */
-async function backfillDaily(daily, uuid, dayId, token) {
-  const gaps = []
+/** 首日基线、旧桶结束边界、回填共享每节点每轮预算；错误不落 null，留给次轮重试。 */
+function snapshotLoader(daily, uuid, token, dayId) {
+  let fetched = 0
+  let failed = false
+  const seen = new Set()
+  const retryFrom = shiftDayId(dayId, -SNAPSHOT_RETRY_DAYS)
+  return async id => {
+    let cached = daily.snapshots[id]
+    if (cached !== undefined && !validSnapshot(cached, midnightTs(id))) cached = daily.snapshots[id] = null
+    if (cached) {
+      seen.add(id)
+      return cached
+    }
+    if (seen.has(id) || (cached === null && id < retryFrom)) return cached
+    if (failed || fetched >= BACKFILL_FETCH_PER_RUN) return undefined
+    seen.add(id)
+    fetched++
+    try {
+      return daily.snapshots[id] = await fetchSnapshot(uuid, midnightTs(id), token)
+    } catch {
+      // 包括重试 null 失败：不把 RPC 错误解释为永久查无。
+      delete daily.snapshots[id]
+      failed = true
+      return undefined
+    }
+  }
+}
+
+/** 首次午夜失败后的同日补偿；保留最初锚点，避免稍后已追平的计数器掩盖早先重置。 */
+async function repairDayStart(prev, getSnapshot) {
+  if (!prev._start || prev.reset) return prev
+  const start = await getSnapshot(prev.id)
+  if (!start) return prev
+  if (prev._start.received < start.received || prev._start.transmitted < start.transmitted
+    || prev.lastReceived < start.received || prev.lastTransmitted < start.transmitted) {
+    return { ...prev, partial: true, reset: true }
+  }
+  const next = {
+    ...prev,
+    received: trafficDelta(prev.lastReceived, start.received),
+    transmitted: trafficDelta(prev.lastTransmitted, start.transmitted),
+    // 该方向仍未上报时，午夜值必须留作下一次有效计数器的比较锚点。
+    // _sample 仍保持真实完整样本/null，不把这里补入的历史基线冒充当前样本。
+    lastReceived: prev.lastReceived ?? start.received,
+    lastTransmitted: prev.lastTransmitted ?? start.transmitted,
+    startedAt: midnightTs(prev.id),
+  }
+  delete next._start
+  if (!next._gaps && validTotal(next.lastReceived) != null && validTotal(next.lastTransmitted) != null) delete next.partial
+  return next
+}
+
+/** 修订一个共享快照时，其端点差来源的邻日必须重新计算，不能只改一侧。 */
+function saveBoundary(daily, id, snapshot) {
+  const previous = daily.snapshots[id]
+  if (previous && (previous.ts !== snapshot.ts || previous.received !== snapshot.received || previous.transmitted !== snapshot.transmitted)) {
+    for (const day of [shiftDayId(id, -1), id]) {
+      if (daily.days[day]?.source === 'snapshot' && !daily.days[day].reset) delete daily.days[day]
+    }
+  }
+  daily.snapshots[id] = snapshot
+}
+
+async function finishDay(daily, prev, getSnapshot) {
+  prev = await repairDayStart(prev, getSnapshot)
+  const endId = shiftDayId(prev.id, 1)
+  let end = await getSnapshot(endId)
+  const last = prev._sample
+  // 已持久化的完整样本本身就是边界候选，不依赖历史 RPC 成功。
+  if (last?.ts === prev.updatedAt && validSnapshot(last, midnightTs(endId)) && (!end || last.ts >= end.ts)) {
+    end = last
+  } else if (end && end.ts <= prev.updatedAt) {
+    end = null
+    delete daily.snapshots[endId]
+  }
+  if (end) {
+    saveBoundary(daily, endId, end)
+    prev = { ...advanceDayWindow(prev, { timestamp: end.ts, total_received: end.received, total_transmitted: end.transmitted }), _closed: true }
+  }
+  // 不用日总量 max 合并；持久化原始窗口锚点，重跑继续推进同一累计来源。
+  daily._pending[prev.id] = prev
+  archiveFinishedDay(daily, end ? prev : { ...prev, partial: true })
+  return prev
+}
+
+async function updateDayWindow(daily, prev, dayId, row, observedAt, getSnapshot) {
+  const rowDay = validTimestamp(row.timestamp) && row.timestamp <= observedAt ? utc8DateId(new Date(row.timestamp)) : null
+  // 先闭合此前失败的桶；已发布历史的闭合锚点不可被旧窗口或迟到旧样本回退。
+  for (const [id, pending] of Object.entries(daily._pending)) {
+    if (pending._closed) {
+      if (id !== prev?.id) delete daily._pending[id]
+    } else if (id < dayId) {
+      await finishDay(daily, rowDay === id ? advanceDayWindow(pending, row) : pending, getSnapshot)
+    }
+  }
+  if (prev && daily._pending[prev.id]) {
+    prev = daily._pending[prev.id]
+  } else if (prev) {
+    if (rowDay === prev.id) prev = advanceDayWindow(prev, row)
+    if (prev.id < dayId) prev = await finishDay(daily, prev, getSnapshot)
+  }
+  if (rowDay !== dayId) return prev
+  if (prev?.id === dayId) return repairDayStart(prev, getSnapshot)
+  const start = await getSnapshot(dayId)
+  const baseline = start ?? { received: validTotal(row.total_received), transmitted: validTotal(row.total_transmitted), ts: row.timestamp }
+  const base = {
+    id: dayId,
+    received: 0,
+    transmitted: 0,
+    lastReceived: baseline.received,
+    lastTransmitted: baseline.transmitted,
+    _sample: baseline.received != null && baseline.transmitted != null ? baseline : null,
+    startedAt: start ? midnightTs(dayId) : row.timestamp,
+    updatedAt: baseline.ts,
+    ...(!start ? { partial: true, _start: baseline } : {}),
+    ...(baseline.received == null || baseline.transmitted == null ? { partial: true, _gaps: true } : {}),
+  }
+  return advanceDayWindow(base, row)
+}
+
+/** 最近 BACKFILL_DAYS 天由相邻两个合规午夜快照做差；重置日不由端点差覆盖。 */
+async function backfillDaily(daily, dayId, getSnapshot) {
   for (let k = 1; k <= BACKFILL_DAYS; k++) {
     const id = shiftDayId(dayId, -k)
     const existing = daily.days[id]
-    if (!existing || existing.partial) gaps.push(id)
-  }
-  const needed = []
-  for (const id of gaps) {
-    for (const sid of [id, shiftDayId(id, 1)]) {
-      if (daily.snapshots[sid] === undefined && !needed.includes(sid)) needed.push(sid)
-    }
-  }
-  for (const sid of needed.slice(0, BACKFILL_FETCH_PER_RUN)) {
-    try {
-      daily.snapshots[sid] = await fetchSnapshot(uuid, midnightTs(sid), token)
-    } catch {
-      break
-    }
-  }
-  for (const id of gaps) {
-    const from = daily.snapshots[id]
-    const to = daily.snapshots[shiftDayId(id, 1)]
+    if (existing && (!existing.partial || existing.reset)) continue
+    const from = await getSnapshot(id)
+    const to = await getSnapshot(shiftDayId(id, 1))
     if (!from || !to) continue
     const entry = {
       received: trafficDelta(to.received, from.received),
       transmitted: trafficDelta(to.transmitted, from.transmitted),
       source: 'snapshot',
     }
-    // 计数器回退过（重启）：差值算不出，退而取重启后的累计值，偏小，标出来
+    // 端点可检测到的回退：只取重置后累计值，明确不是完整日。
     if (to.received < from.received || to.transmitted < from.transmitted) {
       entry.received = to.received
       entry.transmitted = to.transmitted
       entry.reset = true
+      entry.partial = true
     }
     daily.days[id] = entry
   }
 }
 
 /** 裁掉过老的历史和快照；id 是 YYYY-MM-DD，字符串比较即日期比较 */
-function pruneDaily(daily, dayId) {
+function pruneDaily(daily, dayId, activeDay) {
   const minDay = shiftDayId(dayId, -DAILY_KEEP_DAYS)
   const minSnapshot = shiftDayId(dayId, -(BACKFILL_DAYS + 1))
   for (const id of Object.keys(daily.days)) {
     if (id < minDay || id >= dayId) delete daily.days[id]
   }
+  for (const id of Object.keys(daily._pending)) {
+    if (id !== activeDay?.id && (id < minDay || id >= dayId)) delete daily._pending[id]
+  }
+  const required = new Set()
+  for (const id of [...Object.keys(daily._pending), ...(activeDay ? [activeDay.id] : [])]) {
+    required.add(id)
+    required.add(shiftDayId(id, 1))
+  }
   for (const id of Object.keys(daily.snapshots)) {
-    if (id < minSnapshot) delete daily.snapshots[id]
+    if (id < minSnapshot && !required.has(id)) delete daily.snapshots[id]
   }
 }
 
@@ -312,10 +486,20 @@ function resolveToken(params = {}, env = {}) {
   return params.token || env.DEFAULT_TOKEN || DEFAULT_TOKEN
 }
 
+/** 报错前等待所有已启动分支，防止 onCall 返回后仍有旧窗口写入覆盖重试。 */
+async function settleAll(promises) {
+  let failed = false
+  let failure
+  await Promise.all(promises.map(promise => promise.catch(error => {
+    if (!failed) { failed = true; failure = error }
+  })))
+  if (failed) throw failure
+}
+
 /** 按并发度分批跑，避免节点多时把 cron 窗口拖满，也不至于一次打爆主控 */
 async function inBatches(items, size, fn) {
   for (let i = 0; i < items.length; i += size) {
-    await Promise.all(items.slice(i, i + size).map(fn))
+    await settleAll(items.slice(i, i + size).map(fn))
   }
 }
 
@@ -381,7 +565,6 @@ async function syncMonthlyTraffic(params = {}, env = {}) {
   const token = resolveToken(params, env)
   const now = Date.now()
   const nowDate = new Date(now)
-  const dayId = localDateId(nowDate)
   const monthId = localMonthId(nowDate)
 
   const uuidResult = await call('nodeget-server_list_all_agent_uuid', {}, token)
@@ -396,6 +579,9 @@ async function syncMonthlyTraffic(params = {}, env = {}) {
       namespace_key: uuids.map(uuid => ({ namespace: uuid, key: RESET_DAY_KEY })),
     }, token).catch(() => []),
   ])
+  // 日口径使用动态数据取回后的观察时刻；月与计费周期继续使用原轮次起点。
+  const observedAt = Date.now()
+  const dayId = utc8DateId(new Date(observedAt))
 
   const resetDayByUuid = new Map()
   for (const r of resetDayRows || []) {
@@ -428,7 +614,7 @@ async function syncMonthlyTraffic(params = {}, env = {}) {
         { namespace: t.row.uuid, key: TRAFFIC_DAILY_KEY },
       ]),
     }, token)
-    // 靠记录结构认领（每日历史有 days，窗口有 day/month，周期桶有 cycleId），不依赖后端回显 KV key——
+    // 靠记录结构认领（历史有 timeZone/days，窗口有 day/dayUtc8/month，周期桶有 cycleId），不依赖后端回显 KV key——
     // 认不出来就等于丢基线，代价和读失败一样大
     for (const r of storedRows || []) {
       const t = r && r.namespace ? targetByUuid.get(r.namespace) : null
@@ -439,7 +625,7 @@ async function syncMonthlyTraffic(params = {}, env = {}) {
         continue
       }
       const windows = parseWindows(r.value)
-      if (windows.day || windows.month) {
+      if (windows.day || windows.dayUtc8 || windows.month) {
         t.windows = windows
         continue
       }
@@ -454,37 +640,48 @@ async function syncMonthlyTraffic(params = {}, env = {}) {
     const nextCycle = advanceRecord(cycleRecord ?? createRecord(row, cycleId, now), row, now)
 
     const prev = windows || {}
+    const nextDaily = daily ?? { timeZone: DAY_TIME_ZONE, days: {}, snapshots: {}, _pending: {} }
+    const dailyBefore = JSON.stringify(nextDaily)
+    const getSnapshot = snapshotLoader(nextDaily, row.uuid, token, dayId)
+    const dayUtc8 = reviseDayWindow(prev.dayUtc8,
+      await updateDayWindow(nextDaily, prev.dayUtc8, dayId, row, observedAt, getSnapshot))
     const nextWindows = {
-      day: advanceWindow(prev.day, dayId, row, now),
+      ...(prev.day ? { day: prev.day } : {}),
+      ...(dayUtc8 ? { dayUtc8 } : {}),
       month: advanceWindow(prev.month, monthId, row, now),
     }
 
-    // 每日历史：归档昨天 → 回填缺口 → 裁掉过老的。一天只变一次，没变就不写，省一次往返
-    const nextDaily = daily ?? { days: {}, snapshots: {} }
-    const dailyBefore = JSON.stringify(nextDaily)
-    archiveFinishedDay(nextDaily, prev.day, dayId)
-    await backfillDaily(nextDaily, row.uuid, dayId, token)
-    pruneDaily(nextDaily, dayId)
-    const dailyChanged = JSON.stringify(nextDaily) !== dailyBefore
+    await backfillDaily(nextDaily, dayId, getSnapshot)
+    pruneDaily(nextDaily, dayId, dayUtc8)
+    const dailyChanged = !daily || JSON.stringify(nextDaily) !== dailyBefore
 
-    await Promise.all([
+    await settleAll([
       call('kv_set_value', {
         namespace: row.uuid,
         key: cycleKey,
         value: JSON.stringify(nextCycle),
       }, token),
-      call('kv_set_value', {
-        namespace: row.uuid,
-        key: TRAFFIC_WINDOW_KEY,
-        value: JSON.stringify(nextWindows),
-      }, token),
-      dailyChanged
-        ? call('kv_set_value', {
-            namespace: row.uuid,
-            key: TRAFFIC_DAILY_KEY,
-            value: JSON.stringify({ ...nextDaily, updatedAt: now }),
-          }, token)
-        : null,
+      (async () => {
+        // 归档落盘后才发布新日；历史失败也独立保存月桶，但日字段保持已发布版本。
+        let historyError
+        if (dailyChanged) {
+          try {
+            await call('kv_set_value', {
+              namespace: row.uuid,
+              key: TRAFFIC_DAILY_KEY,
+              value: JSON.stringify({ ...nextDaily, updatedAt: observedAt }),
+            }, token)
+          } catch (error) {
+            historyError = error
+          }
+        }
+        await call('kv_set_value', {
+          namespace: row.uuid,
+          key: TRAFFIC_WINDOW_KEY,
+          value: JSON.stringify(historyError ? { ...prev, month: nextWindows.month } : nextWindows),
+        }, token)
+        if (historyError) throw historyError
+      })(),
     ])
     updated++
     if (dailyChanged) dailyUpdated++

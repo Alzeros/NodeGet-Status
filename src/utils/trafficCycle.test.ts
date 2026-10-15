@@ -9,9 +9,10 @@ import {
   nextCycleStartId,
   nextResetTime,
   resetCountdownLabel,
+  utc8DateId,
 } from './trafficCycle'
 
-// 全部用 new Date(y, m, d, h) 构造本地时间——重置时刻的语义就是"本地零点"。
+// 计费周期仍用本地时间；固定 UTC+8 日窗口另外用带明确时区的时间样本。
 const at = (y: number, m: number, d: number, h = 12) => new Date(y, m - 1, d, h, 0, 0, 0)
 
 describe('clampResetDay', () => {
@@ -80,6 +81,19 @@ describe('自然日/自然月窗口 id', () => {
   test('当天零点与当天末刻落在同一个窗口', () => {
     expect(localDateId(at(2026, 9, 8, 0))).toBe(localDateId(at(2026, 9, 8, 23)))
     expect(localMonthId(at(2026, 9, 1, 0))).toBe(localMonthId(at(2026, 9, 30, 23)))
+  })
+})
+
+describe('utc8DateId', () => {
+  test.each([
+    ['2026-09-25T15:59:59Z', '2026-09-25'],
+    ['2026-09-25T16:00:00Z', '2026-09-26'],
+    ['2026-09-30T16:00:00Z', '2026-10-01'],
+    ['2026-12-31T16:00:00Z', '2027-01-01'],
+    ['2028-02-28T16:00:00Z', '2028-02-29'],
+    ['2026-03-08T16:00:00Z', '2026-03-09'],
+  ])('%s 按固定 UTC+8 分日为 %s', (input, expected) => {
+    expect(utc8DateId(new Date(input))).toBe(expected)
   })
 })
 

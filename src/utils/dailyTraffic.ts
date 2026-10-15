@@ -1,6 +1,7 @@
 import type { Node } from '../types'
 import { displayName } from './derive'
-import { shiftDayId } from './trafficCycle'
+import { shiftDayId, utc8DateId } from './trafficCycle'
+import { currentDailyTraffic } from './dailyTrafficState'
 
 /*
  * 每日流量柱状图的数据。已结束的日子来自 worker 归档的 dailyHistory，
@@ -28,9 +29,9 @@ export interface DailyBar {
   transmitted: number
   /** 当天有记录的机器数 */
   machines: number
-  /** 当天统计不完整的机器数（worker 当天中途才开始统计） */
+  /** 当天统计不完整的机器数（边界采样缺失或只覆盖部分时段） */
   partial: number
-  /** 当天计数器归零过的机器数（重启），数字偏小 */
+  /** 当天计数器重置过的机器数，数字可能偏小 */
   reset: number
   /** 分机器明细，按用量降序 */
   nodes: DailyBarNode[]
@@ -40,9 +41,9 @@ export interface DailyBar {
 }
 
 export interface DailyChart {
-  /** 固定 DAILY_CHART_DAYS 根，按日期升序，最右是今天（或最近有记录的一天） */
+  /** 固定 count 根，按日期升序，最右始终是 UTC+8 今天。 */
   bars: DailyBar[]
-  todayId: string | null
+  todayId: string
   /** 已结束且有记录的天数 */
   days: number
   sum: number
@@ -64,9 +65,8 @@ function regionOf(n: Node) {
   return code && /^[A-Z]{2}$/.test(code) ? code : null
 }
 
-export function buildDailyBars(nodes: Node[], count = DAILY_CHART_DAYS): DailyChart | null {
-  // 窗口 id 由主控写定，"今天"以它为准，而不是浏览器的今天
-  const todayId = nodes.find(n => n.dailyTraffic)?.dailyTraffic?.cycleId ?? null
+export function buildDailyBars(nodes: Node[], count = DAILY_CHART_DAYS, now: Date = new Date()): DailyChart | null {
+  const todayId = utc8DateId(now)
   const byId = new Map<string, DailyBar>()
   const add = (
     n: Node,
@@ -98,18 +98,18 @@ export function buildDailyBars(nodes: Node[], count = DAILY_CHART_DAYS): DailyCh
   for (const n of nodes) {
     for (const d of n.dailyHistory ?? []) {
       // 历史只收已结束的日子；今天以实时窗口为准，免得两边都算一遍
-      if (todayId && d.id >= todayId) continue
+      if (d.id >= todayId) continue
       add(n, d.id, d.received, d.transmitted, d, false)
     }
-    if (n.dailyTraffic) add(n, n.dailyTraffic.cycleId, n.dailyTraffic.received, n.dailyTraffic.transmitted, {}, true)
+    const current = currentDailyTraffic(n.dailyTraffic, now)
+    if (current) add(n, current.cycleId, current.received, current.transmitted, current, true)
   }
   if (!byId.size) return null
   for (const b of byId.values()) b.nodes.sort((a, c) => c.total - a.total)
 
-  const end = todayId ?? [...byId.keys()].sort().pop()!
   const bars: DailyBar[] = []
   for (let i = count - 1; i >= 0; i--) {
-    const id = shiftDayId(end, -i)
+    const id = shiftDayId(todayId, -i)
     bars.push(byId.get(id) ?? blank(id, id === todayId))
   }
   const done = bars.filter(b => !b.empty && !b.today)
@@ -122,7 +122,7 @@ export function buildDailyBars(nodes: Node[], count = DAILY_CHART_DAYS): DailyCh
     sum,
     avg: done.length ? sum / done.length : 0,
     peak,
-    today: bars.find(b => b.today) ?? null,
+    today: bars.find(b => b.today && !b.empty) ?? null,
     max: Math.max(...bars.map(b => b.total), 1),
     flagged: bars.filter(b => b.partial || b.reset).length,
   }

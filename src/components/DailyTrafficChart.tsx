@@ -18,16 +18,16 @@ function mmdd(id: string) {
 }
 
 function describeBar(b: DailyBar) {
-  if (b.empty) return `${b.id} 无记录`
+  if (b.empty) return `${b.id}（UTC+8） ${b.today ? '等待 UTC+8 日窗口更新' : '无记录'}`
   const parts = [
-    `${b.id}${b.today ? '（今天，实时累计）' : ''}`,
+    `${b.id}（UTC+8）${b.today ? '（今天，实时累计）' : ''}`,
     `合计 ${bytes(b.total)}`,
     `下行 ${bytes(b.received)}`,
     `上行 ${bytes(b.transmitted)}`,
     `${b.machines} 台`,
   ]
   if (b.partial) parts.push(`${b.partial} 台当天统计不完整`)
-  if (b.reset) parts.push(`${b.reset} 台当天重启过，数字偏小`)
+  if (b.reset) parts.push(`${b.reset} 台当天计数器重置，数字偏小`)
   return parts.join(' · ')
 }
 
@@ -78,8 +78,8 @@ export function DailyTrafficChart({ data, showSource }: { data: DailyChart | nul
   if (!data) {
     return (
       <div className="flex-1 flex items-center justify-center text-center text-sm text-muted-foreground py-12 px-4">
-        需要主控的流量采样 Worker 写入每日历史（scripts/monthly-traffic-worker.js）。更新 Worker
-        后会自动回填最近约三周，之后每天累积
+        等待 UTC+8 日窗口更新。需要所有主控使用新版流量采样 Worker（scripts/monthly-traffic-worker.js）。
+        初始最多回填 31 天，实际可恢复范围取决于主控保留期，之后每天累积
       </div>
     )
   }
@@ -163,12 +163,12 @@ export function DailyTrafficChart({ data, showSource }: { data: DailyChart | nul
                   style={{ left: tipPos?.left ?? 0, top: tipPos?.top ?? 0, visibility: tipPos ? 'visible' : 'hidden' }}
                 >
                   {hovered.empty ? (
-                    <div className="text-muted-foreground">{hovered.id} · 无记录</div>
+                    <div className="text-muted-foreground">{hovered.id}（UTC+8） · {hovered.today ? '等待 UTC+8 日窗口更新' : '无记录'}</div>
                   ) : (
                     <>
                       <div className="text-sm font-semibold">{bytes(hovered.total)}</div>
                       <div className="text-muted-foreground mt-0.5">
-                        {hovered.id}
+                        {hovered.id}（UTC+8）
                         {hovered.today && ' · 今天，实时累计'}
                       </div>
                       <div className="text-muted-foreground tabular-nums">
@@ -178,7 +178,7 @@ export function DailyTrafficChart({ data, showSource }: { data: DailyChart | nul
                         <div className="text-amber-600">{hovered.partial} 台当天统计不完整</div>
                       )}
                       {hovered.reset > 0 && (
-                        <div className="text-amber-600">{hovered.reset} 台当天重启过，数字偏小</div>
+                        <div className="text-amber-600">{hovered.reset} 台当天计数器重置，数字偏小</div>
                       )}
                       {/* 分机器明细：降序；不足 1 GiB 的和超出行数的并成"其他"。
                           两列排：十来行竖着排会伸出卡片压到下一张，两列正好落在绘图区里 */}
@@ -239,7 +239,7 @@ export function DailyTrafficChart({ data, showSource }: { data: DailyChart | nul
             <Stat
               label="今天 · 实时"
               value={data.today ? bytes(data.today.total) : '—'}
-              sub={data.today ? `↓${bytes(data.today.received)} · ↑${bytes(data.today.transmitted)}` : undefined}
+              sub={data.today ? `↓${bytes(data.today.received)} · ↑${bytes(data.today.transmitted)}` : '等待 UTC+8 日窗口更新'}
             />
           </div>
         </div>
@@ -260,7 +260,7 @@ export function DailyTrafficChart({ data, showSource }: { data: DailyChart | nul
           <table className="w-full text-xs tabular-nums">
             <thead className="text-[11px] text-muted-foreground">
               <tr>
-                <th className="text-left font-medium px-3 py-1.5">日期</th>
+                <th className="text-left font-medium px-3 py-1.5">日期（UTC+8）</th>
                 <th className="text-right font-medium px-3 py-1.5">合计</th>
                 <th className="text-right font-medium px-3 py-1.5">下行</th>
                 <th className="text-right font-medium px-3 py-1.5">上行</th>
@@ -289,8 +289,8 @@ export function DailyTrafficChart({ data, showSource }: { data: DailyChart | nul
       )}
 
       <div className="text-[10px] text-muted-foreground/70 mt-3">
-        浅色柱 = 今天，实时累计 · 灰线 = 无记录 · 按主控时区分日
-        {data.flagged > 0 && ' · 个别日子有机器统计不完整或当天重启过，悬停可见'}
+        浅色柱 = 今天，实时累计 · 灰线 = 无记录 · 按 UTC+8 零点分日
+        {data.flagged > 0 && ' · 个别日子有机器统计不完整或计数器重置，悬停可见'}
       </div>
     </>
   )

@@ -7,7 +7,7 @@ import { remainingDays } from '../utils/cost'
 import { cn, loadColor } from '../utils/cn'
 import { Flag } from './Flag'
 import { currencyCode, convert, getUsdRates } from '../utils/currency'
-import { currentCycleId, localDateId, localMonthId, msUntilNextReset, nextCycleStartId, resetCountdownLabel } from '../utils/trafficCycle'
+import { currentCycleId, localMonthId, msUntilNextReset, nextCycleStartId, resetCountdownLabel, utc8DateId } from '../utils/trafficCycle'
 import { buildDailyBars, DAILY_CHART_DAYS } from '../utils/dailyTraffic'
 import { DailyTrafficChart } from './DailyTrafficChart'
 import type { Node } from '../types'
@@ -55,8 +55,8 @@ const TRAFFIC_MODES: {
   {
     key: 'today',
     label: '今日',
-    subtitle: '自然日 · 跨机器可比',
-    note: '统计当天零点至今的上下行合计，所有机器同一时间窗',
+    subtitle: 'UTC+8 自然日 · 跨机器可比',
+    note: '统计 UTC+8 当天零点至今的上下行合计，所有机器同一时间窗',
   },
   {
     key: 'month',
@@ -404,12 +404,13 @@ export function StatsView({ nodes, statuses, showSource }: Props) {
 
   // 窗口数据是否已就位，决定默认口径——worker 没更新时不该默认停在一张空榜上。
   // 不用 effect 纠正 state：数据晚到时这里自然重算，用户点过则以 trafficPick 为准
+  const todayId = utc8DateId()
   const hasWindow = useMemo(
     () => ({
-      today: visible.some(n => n.dailyTraffic),
+      today: visible.some(n => n.dailyTraffic?.cycleId === todayId),
       month: visible.some(n => n.calendarMonthTraffic),
     }),
-    [visible],
+    [visible, todayId],
   )
   const [trafficPick, setTrafficPick] = useState<TrafficMode | null>(null)
   const trafficMode: TrafficMode = trafficPick ?? (hasWindow.today ? 'today' : 'cycle')
@@ -421,7 +422,7 @@ export function StatsView({ nodes, statuses, showSource }: Props) {
     for (const n of visible) {
       const bucket =
         trafficMode === 'today'
-          ? n.dailyTraffic
+          ? (n.dailyTraffic?.cycleId === todayId ? n.dailyTraffic : undefined)
           : trafficMode === 'month'
             ? n.calendarMonthTraffic
             : n.monthlyTraffic
@@ -437,23 +438,20 @@ export function StatsView({ nodes, statuses, showSource }: Props) {
     }
     rows.sort((a, b) => b.value - a.value)
     return rows.slice(0, TOP_N)
-  }, [visible, showSource, trafficMode])
+  }, [visible, showSource, trafficMode, todayId])
   const trafficMax = Math.max(...trafficData.map(d => d.value), 1)
 
-  // 窗口 id 由主控写定，明示出来：主控与访客不同时区时，"今日"指的是主控的今日
+  // 今日固定 UTC+8；自然月仍展示主控原窗口，不随日统计迁移。
   const trafficWindowNote = useMemo(() => {
-    if (trafficMode !== 'today' && trafficMode !== 'month') return ''
-    const id =
-      trafficMode === 'today'
-        ? visible.find(n => n.dailyTraffic)?.dailyTraffic?.cycleId
-        : visible.find(n => n.calendarMonthTraffic)?.calendarMonthTraffic?.cycleId
+    if (trafficMode === 'today') return `统计窗口 ${todayId}（UTC+8）`
+    if (trafficMode !== 'month') return ''
+    const id = visible.find(n => n.calendarMonthTraffic)?.calendarMonthTraffic?.cycleId
     if (!id) return ''
-    const local = trafficMode === 'today' ? localDateId() : localMonthId()
-    return id === local ? `统计窗口 ${id}` : `统计窗口 ${id}（主控本地时区）`
-  }, [visible, trafficMode])
+    return id === localMonthId() ? `统计窗口 ${id}` : `统计窗口 ${id}（主控本地时区）`
+  }, [visible, trafficMode, todayId])
 
-  // 每日流量：已结束的日子来自 worker 归档的历史，今天用实时窗口
-  const daily = useMemo(() => buildDailyBars(visible), [visible])
+  // 每日流量：已结束的日子来自 Worker 归档的历史，今天用实时窗口。
+  const daily = useMemo(() => buildDailyBars(visible), [visible, todayId])
 
   // 流量重置倒计时榜。只看"有额度"的机器，与窗口数据无关，所以不受 worker 是否更新影响
   const resetRows = useMemo(
@@ -764,10 +762,11 @@ export function StatsView({ nodes, statuses, showSource }: Props) {
           </div>
           {trafficData.length === 0 ? (
             <div className="flex-1 flex items-center justify-center text-center text-sm text-muted-foreground py-12 px-4">
-              {(trafficMode === 'today' && !hasWindow.today) ||
-              (trafficMode === 'month' && !hasWindow.month)
-                ? '该口径需要主控的流量采样 Worker 写入自然日/自然月窗口（scripts/monthly-traffic-worker.js），更新 Worker 后从那时起累计'
-                : '暂无流量数据'}
+              {trafficMode === 'today' && !hasWindow.today
+                ? '等待 UTC+8 日窗口更新；请确认所有主控已更新新版流量采样 Worker'
+                : trafficMode === 'month' && !hasWindow.month
+                  ? '该口径需要主控的流量采样 Worker 写入自然月窗口（scripts/monthly-traffic-worker.js），更新 Worker 后从那时起累计'
+                  : '暂无流量数据'}
             </div>
           ) : (
             <div className="flex flex-col gap-2">

@@ -1,4 +1,4 @@
-import { describe, test, expect } from 'vitest'
+import { afterEach, beforeEach, describe, test, expect, vi } from 'vitest'
 import { buildDailyBars, foldBreakdown, niceBytes } from './dailyTraffic'
 import type { DailyBarNode } from './dailyTraffic'
 import { shiftDayId } from './trafficCycle'
@@ -36,6 +36,12 @@ describe('shiftDayId', () => {
 })
 
 describe('buildDailyBars', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-26T12:00:00+08:00'))
+  })
+  afterEach(() => vi.useRealTimers())
+
   test('没有任何数据返回 null', () => {
     expect(buildDailyBars([node('a')])).toBeNull()
   })
@@ -69,12 +75,62 @@ describe('buildDailyBars', () => {
     expect(chart.today?.nodes).toHaveLength(1)
   })
 
-  test('没有实时窗口时，以最近有记录的一天收尾', () => {
-    const a = node('a', [{ id: '2026-09-20', received: 1, transmitted: 1 }])
+  test('没有实时窗口也按 UTC+8 今天收尾，今天为空而不是零用量', () => {
+    const a = node('a', [{ id: '2026-09-25', received: 1, transmitted: 1 }])
     const chart = buildDailyBars([a], 3)!
-    expect(chart.todayId).toBeNull()
+    expect(chart.todayId).toBe('2026-09-26')
     expect(chart.today).toBeNull()
-    expect(chart.bars.map(x => x.id)).toEqual(['2026-09-18', '2026-09-19', '2026-09-20'])
+    expect(chart.bars.map(x => x.id)).toEqual(['2026-09-24', '2026-09-25', '2026-09-26'])
+    expect(chart.bars[2]).toMatchObject({ today: true, empty: true, machines: 0 })
+  })
+
+  test('不同主控晚换桶时，旧桶不决定今天也不混入今日或冒充已归档历史', () => {
+    const old = node('old', [{ id: '2026-09-24', received: 1, transmitted: 2 }], window('2026-09-25', 900, 900))
+    const fresh = node('fresh', [{ id: '2026-09-25', received: 2, transmitted: 3 }], window('2026-09-26', 4, 5))
+    for (const nodes of [[old, fresh], [fresh, old]]) {
+      const chart = buildDailyBars(nodes, 3)!
+      expect(chart.todayId).toBe('2026-09-26')
+      expect(chart.today).toMatchObject({ total: 9, machines: 1 })
+      expect(chart.today?.nodes.map(n => n.uuid)).toEqual(['fresh'])
+      expect(chart.sum).toBe(8)
+    }
+  })
+
+  test('历史尚未补读时留空，补读完成后归档与新桶各算一次', () => {
+    const a = node('a', [], window('2026-09-26', 1, 2))
+    const pending = buildDailyBars([a], 2)!
+    expect(pending.bars[0].empty).toBe(true)
+    expect(pending.today?.total).toBe(3)
+    a.dailyHistory = [
+      { id: '2026-09-25', received: 4, transmitted: 5 },
+      { id: '2026-09-26', received: 99, transmitted: 99 },
+      { id: '2026-09-27', received: 99, transmitted: 99 },
+    ]
+    const loaded = buildDailyBars([a], 2)!
+    expect(loaded.sum).toBe(9)
+    expect(loaded.today?.total).toBe(3)
+  })
+
+  test('只有今天或未来历史、旧日或未来窗口时没有可展示记录', () => {
+    const history = [{ id: '2026-09-26', received: 99, transmitted: 99 }, { id: '2026-09-27', received: 99, transmitted: 99 }]
+    expect(buildDailyBars([node('a', history)])).toBeNull()
+    expect(buildDailyBars([node('a', [], window('2026-09-25', 9, 9))])).toBeNull()
+    expect(buildDailyBars([node('a', [], window('2026-09-27', 9, 9))])).toBeNull()
+  })
+
+  test('真实零用量仍是有记录的一天，并保留当前桶不完整和重置标记', () => {
+    const daily = { ...window('2026-09-26', 0, 0), partial: true, reset: true }
+    const chart = buildDailyBars([node('a', [], daily)])!
+    expect(chart.today).toMatchObject({ total: 0, empty: false, machines: 1, partial: 1, reset: 1 })
+    expect(chart.flagged).toBe(1)
+  })
+
+  test('显式 now 在 UTC+8 午夜跨年后不再显示上一天的实时桶', () => {
+    const a = node('a', [{ id: '2026-12-30', received: 1, transmitted: 1 }], window('2026-12-31', 3, 4))
+    expect(buildDailyBars([a], 2, new Date('2026-12-31T15:59:59Z'))?.today?.total).toBe(7)
+    const next = buildDailyBars([a], 3, new Date('2026-12-31T16:00:00Z'))!
+    expect(next.bars.map(b => b.id)).toEqual(['2026-12-30', '2026-12-31', '2027-01-01'])
+    expect(next.today).toBeNull()
   })
 })
 

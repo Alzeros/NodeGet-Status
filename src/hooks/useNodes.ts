@@ -9,6 +9,7 @@ import type { LatencyBuffer } from '../utils/latencyBuffer'
 import { billedTraffic } from '../utils/derive'
 import { isOnline } from '../utils/status'
 import { clampResetDay, currentCycleId } from '../utils/trafficCycle'
+import { createDailyHistoryRefresh, createDailyTrafficReceiver, parseDailyHistory, parseDailyWindow, previewDailyTraffic } from '../utils/dailyTrafficState'
 import type { DailyTrafficDay, DynamicSummary, HistorySample, MonthlyTraffic, Node, NodeMeta, SiteConfig } from '../types'
 
 type Agent = Pick<Node, 'uuid' | 'source' | 'meta' | 'static'>
@@ -69,11 +70,10 @@ const LATENCY_WINDOW_MS = 24 * 60 * 60 * 1000
 const LIST_RETRY_DELAYS_MS = [2000, 5000, 10_000]
 const HISTORY_LIMIT = 60
 const TRAFFIC_CYCLE_KEY_PREFIX = 'metadata_traffic_cycle:'
-// 自然日/自然月窗口，由 scripts/monthly-traffic-worker.js 写入。
-// 窗口 id 在记录里，不在 key 上——前端不用猜主控时区，也省一次 KV 读。
+// dayUtc8 固定 UTC+8；month 仍沿用主控原口径，二者都由 Worker 写入。
 const TRAFFIC_WINDOW_KEY = 'metadata_traffic_window'
-// 已结束的自然日逐日用量，同样由 worker 写入。一天只变一次，单独慢轮询，不跟 2 秒的动态数据走
-const TRAFFIC_DAILY_KEY = 'metadata_traffic_daily'
+// 与旧 UTC/主控日历史隔离；慢轮询之外，发现新日桶会立即补读。
+const TRAFFIC_DAILY_KEY = 'metadata_traffic_daily_utc8'
 const DAILY_HISTORY_INTERVAL_MS = 15 * 60_000
 // 切回前台时，距上次读取超过这个时长才补读
 const DAILY_HISTORY_STALE_MS = 5 * 60_000
@@ -144,8 +144,7 @@ function parseMonthlyTrafficRecord(raw: unknown, cycleId: string): MonthlyTraffi
 }
 
 /**
- * 单个自然日/自然月窗口。窗口 id 直接用记录里主控写下的值，不拿浏览器的"今天"去校验——
- * 主控与访客未必同时区，按本地日期卡会把好数据判成过期。窗口 id 由 UI 明示给用户。
+ * 自然月窗口继续采用主控写下的 id，不受固定 UTC+8 日统计影响。
  */
 function parseTrafficWindow(raw: unknown): MonthlyTraffic | undefined {
   if (!raw || typeof raw !== 'object') return undefined
@@ -156,40 +155,17 @@ function parseTrafficWindow(raw: unknown): MonthlyTraffic | undefined {
 }
 
 /**
- * metadata_traffic_window 一条记录里带两个窗口。
- * 靠结构识别（窗口有 day/month，周期桶有 cycleId），不依赖后端回显 KV key。
+ * metadata_traffic_window：只消费新 dayUtc8 和原 month，不回退旧 day。
+ * 靠结构识别，不依赖后端回显 KV key。
  */
 function parseTrafficWindows(raw: unknown): { day?: MonthlyTraffic; month?: MonthlyTraffic } {
   try {
     const value = typeof raw === 'string' ? JSON.parse(raw) : raw
     if (!value || typeof value !== 'object') return {}
-    const record = value as { day?: unknown; month?: unknown }
-    return { day: parseTrafficWindow(record.day), month: parseTrafficWindow(record.month) }
+    const record = value as { month?: unknown }
+    return { day: parseDailyWindow(value), month: parseTrafficWindow(record.month) }
   } catch {
     return {}
-  }
-}
-
-/**
- * metadata_traffic_daily：{ days: { 'YYYY-MM-DD': { received, transmitted, partial?, reset? } }, snapshots, updatedAt }。
- * 只取 days；snapshots 是 worker 回填用的中间态。返回按日期升序的数组。
- */
-function parseDailyHistory(raw: unknown): DailyTrafficDay[] | undefined {
-  try {
-    const value = typeof raw === 'string' ? JSON.parse(raw) : raw
-    const days = (value as { days?: unknown } | null)?.days
-    if (!days || typeof days !== 'object') return undefined
-    const out: DailyTrafficDay[] = []
-    for (const [id, v] of Object.entries(days as Record<string, Partial<DailyTrafficDay> | null>)) {
-      if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(id)) continue
-      const day: DailyTrafficDay = { id, received: validTotal(v.received) ?? 0, transmitted: validTotal(v.transmitted) ?? 0 }
-      if (v.partial) day.partial = true
-      if (v.reset) day.reset = true
-      out.push(day)
-    }
-    return out.sort((a, b) => a.id.localeCompare(b.id))
-  } catch {
-    return undefined
   }
 }
 
@@ -347,6 +323,9 @@ export function useNodes(config: SiteConfig | null) {
   useEffect(() => {
     setErrors([])
     setMetaHydrated(false)
+    // 新配置使用新一代日缓存，不与上一 effect 的响应或版本基线混合。
+    setDailyTraffic(new Map())
+    setDailyHistory(new Map())
     // config.json 还没到：保持 loading。
     // 否则这里会把 loading 置为 false 且再不置回，导致 config 到达后
     // hasNodes 仍为 false、loading 已 false —— 页面闪现一下"暂无节点"，
@@ -361,6 +340,7 @@ export function useNodes(config: SiteConfig | null) {
     const pool = new BackendPool(config.site_tokens)
     setPool(pool)
     const sourceUuids = new Map<string, string[]>()
+    let disposed = false
     const loadMonthlyTraffic = async (
       entry: { name: string; client: BackendPool['entries'][number]['client'] },
       rows: DynamicSummary[],
@@ -399,15 +379,14 @@ export function useNodes(config: SiteConfig | null) {
       }
 
       mergeTraffic(setMonthlyTraffic, cycleUpdates)
-      mergeTraffic(setDailyTraffic, dayUpdates)
       mergeTraffic(setCalendarMonthTraffic, monthUpdates)
+      dailyReceiver.accept(dayUpdates).catch(() => {})
     }
 
     let dailyLoadedAt = 0
     const loadDailyHistory = async () => {
-      if (document.hidden) return
-      dailyLoadedAt = Date.now()
-      await Promise.allSettled(
+      if (disposed) return
+      const results = await Promise.allSettled(
         pool.entries.map(async entry => {
           const uuids = sourceUuids.get(entry.name) || []
           if (!uuids.length) return
@@ -417,12 +396,23 @@ export function useNodes(config: SiteConfig | null) {
             const days = parseDailyHistory(row?.value)
             if (days) updates.set(monthlyTrafficMapKey(entry.name, row.namespace), days)
           }
-          if (updates.size) setDailyHistory(prev => new Map([...prev, ...updates]))
+          if (!disposed && updates.size) setDailyHistory(prev => disposed ? prev : new Map([...prev, ...updates]))
         }),
       )
+      // 所有主控都结束后才放开 inflight；任一失败都保留下次 observe 的重试能力。
+      const failed = results.find(result => result.status === 'rejected')
+      if (failed?.status === 'rejected') throw failed.reason
+      dailyLoadedAt = Date.now()
+    }
+    const dailyRefresh = createDailyHistoryRefresh(loadDailyHistory)
+    const dailyReceiver = createDailyTrafficReceiver(setDailyTraffic, (key, id) =>
+      document.hidden ? Promise.resolve() : dailyRefresh.observe(key, id),
+    )
+    const refreshDailyHistory = () => {
+      // 不让跳过的后台读取被协调器误记为成功。
+      if (!document.hidden && !disposed) dailyRefresh.refresh().catch(() => {})
     }
 
-    let disposed = false
     const listUuidsWithRetry = async (client: BackendPool['entries'][number]['client']) => {
       for (let attempt = 0; ; attempt++) {
         try {
@@ -448,8 +438,10 @@ export function useNodes(config: SiteConfig | null) {
       setAgents(seed)
 
       // 每日流量历史：与元数据并行，不阻塞 loading
-      loadDailyHistory().catch(() => {})
-      dailyTimer = setInterval(() => loadDailyHistory().catch(() => {}), DAILY_HISTORY_INTERVAL_MS)
+      if (!disposed) {
+        refreshDailyHistory()
+        dailyTimer = setInterval(refreshDailyHistory, DAILY_HISTORY_INTERVAL_MS)
+      }
 
       // 并行获取元数据/静态数据、动态数据、延迟数据
       const metaStaticTask = Promise.all(
@@ -619,7 +611,7 @@ export function useNodes(config: SiteConfig | null) {
       if (document.visibilityState !== 'visible') return
       tickDynamic()
       tickLatency().catch(() => {})
-      if (Date.now() - dailyLoadedAt > DAILY_HISTORY_STALE_MS) loadDailyHistory().catch(() => {})
+      if (Date.now() - dailyLoadedAt > DAILY_HISTORY_STALE_MS) refreshDailyHistory()
     }
     document.addEventListener('visibilitychange', onVisible)
 
@@ -628,6 +620,7 @@ export function useNodes(config: SiteConfig | null) {
 
     return () => {
       disposed = true
+      dailyReceiver.dispose()
       clearInterval(dynTimer)
       clearInterval(clockTimer)
       if (latTimer) clearInterval(latTimer)
@@ -640,6 +633,7 @@ export function useNodes(config: SiteConfig | null) {
 
   const nodes = useMemo(() => {
     const now = Date.now()
+    const dailyNow = new Date(now)
     const out = new Map<string, Node>()
     for (const [uuid, a] of agents) {
       const dyn = live.get(uuid) || null
@@ -663,7 +657,7 @@ export function useNodes(config: SiteConfig | null) {
                 : undefined,
           }
         : undefined
-      // 自然日/自然月窗口：同样用实时计数器往前推，避免 30 分钟采样间隔里数字冻住
+      // 日窗口先检查 UTC+8 今天再预览；5 秒时钟即使未收到新桶也会清掉过期日。自然月不变。
       const dayRecord = dailyTraffic.get(mapKey)
       const monthRecord = calendarMonthTraffic.get(mapKey)
       out.set(uuid, {
@@ -672,7 +666,7 @@ export function useNodes(config: SiteConfig | null) {
         history: history.get(uuid) || [],
         online: isOnline(dyn?.timestamp, now),
         monthlyTraffic: nodeMonthlyTraffic,
-        dailyTraffic: dayRecord ? previewMonthlyTraffic(dayRecord, dyn) : undefined,
+        dailyTraffic: previewDailyTraffic(dayRecord, dyn, dailyNow),
         calendarMonthTraffic: monthRecord ? previewMonthlyTraffic(monthRecord, dyn) : undefined,
         dailyHistory: dailyHistory.get(mapKey),
       })

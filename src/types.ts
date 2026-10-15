@@ -98,20 +98,19 @@ export interface Node {
   history: HistorySample[]
   monthlyTraffic?: MonthlyTraffic
   /**
-   * 自然日窗口用量（今日）。与 monthlyTraffic 同结构，cycleId 存窗口 id（YYYY-MM-DD）。
-   * 窗口 id 由主控 worker 写定，所以这里是"主控本地时区的今天"。
-   * 需要主控的采样 worker 支持 metadata_traffic_window，否则为 undefined。
+   * 固定 UTC+8 今日窗口。cycleId 存 YYYY-MM-DD，只读取 metadata_traffic_window.dayUtc8。
+   * 过期/未来窗口及尚未更新的 Worker 均为 undefined，不回退旧 day。
    */
   dailyTraffic?: MonthlyTraffic
-  /** 自然月窗口用量（当月）。同上，cycleId 存 YYYY-MM。 */
+  /** 主控原时区的自然月窗口用量，cycleId 存 YYYY-MM，不随 UTC+8 日统计改变。 */
   calendarMonthTraffic?: MonthlyTraffic
-  /** 已结束的自然日逐日用量，按日期升序，不含今天（今天看 dailyTraffic）。同样来自主控 worker。 */
+  /** 固定 UTC+8 日历史，按日期升序；图表只使用已结束日，今天看 dailyTraffic。 */
   dailyHistory?: DailyTrafficDay[]
 }
 
 /**
- * 一个已结束的自然日的流量（主控时区），由采样 worker 写入 metadata_traffic_daily。
- * partial：worker 当天中途才开始统计，数字偏小；reset：当天计数器归零过（重启），只算到了重启后的部分。
+ * 一个 UTC+8 自然日的流量，由采样 Worker 写入 metadata_traffic_daily_utc8。
+ * partial：边界采样缺失或只覆盖部分时段；reset：检测到计数器归零，部分用量无法恢复。
  */
 export interface DailyTrafficDay {
   id: string
@@ -135,6 +134,11 @@ export interface MonthlyTraffic {
   percent?: number
   startedAt: number
   updatedAt: number
+  /** 仅 UTC+8 日窗口：同日载荷修订号，独立于真实采样 updatedAt；旧 Worker 可缺省。 */
+  revision?: number
+  /** UTC+8 日窗口的采样缺口/计数器重置标记；月与计费周期不受影响。 */
+  partial?: boolean
+  reset?: boolean
 }
 
 export interface ThemeConfig {
